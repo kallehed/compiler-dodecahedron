@@ -1,0 +1,9 @@
+
+FORM $myvar === 343 + 34 
+$myvar === @add(1,2)
+ "kalles string" 
+IF $myvar = 34 {
+		
+	@print(myvar)
+}
+

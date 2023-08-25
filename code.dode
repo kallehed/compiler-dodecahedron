@@ -1,9 +1,13 @@
 
-FORM $myvar === 343 + 34 
-$myvar === @add(1,2)
- "kalles string" 
-IF $myvar = 34 {
+FORM $my_var === 343 + 34 
+$my_var +== @add(1,2,3, "le string")
+FORM $other_var === 49 * 4 + 2
+IF $my_var = 34 {
 		
 	@print(myvar)
+}
+
+WHILE $my_var + 3 = 3 {
+
 }
 

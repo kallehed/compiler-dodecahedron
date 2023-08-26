@@ -26,6 +26,9 @@ fn main() {
 
     println!("\n tree version: \n");
     parser::print_ast(&ast);
+
+    println!("\n Correctness of AST pass: \n");
+    parser::check_that_ast_is_correct(&ast);
 }
 
 const STRING_DELIMITER: char = '"';

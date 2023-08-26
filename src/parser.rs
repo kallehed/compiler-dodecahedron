@@ -3,8 +3,6 @@ use crate::Keyword;
 use crate::SetType;
 use crate::Token;
 use crate::VariableNameIdx;
-use crate::STRING_DELIMITER;
-use crate::VARIABLE_PREFIX;
 
 type ASTBox<T> = Box<T>;
 type ASTVec<T> = Vec<T>;
@@ -26,7 +24,6 @@ pub enum ASTExpr {
     VarName(VariableNameIdx),
     FunctionCall(FunctionNameIdx, Option<ASTBox<ASTExpr>>),
     Binary(BinaryOp, ASTBox<ASTExpr>, ASTBox<ASTExpr>),
-    Neg(ASTBox<ASTExpr>),
 }
 
 #[derive(Debug)]
@@ -47,86 +44,73 @@ pub enum ASTStatement {
     EvalExpr(ASTExpr), // for just evaulating an expression like a function call
 }
 
-pub fn print_ast(body: &ASTBody) {
-    fn print_indent(indent: u64) {
-        for _ in 0..(indent * 2) {
-            print!(" ");
-        }
-    }
-
-    fn print_expr(expr: &ASTExpr, indent: u64) {
-        print_indent(indent);
-        match expr {
-            ASTExpr::Number(num) => {
-                println!("{:?}", num);
-            }
-            ASTExpr::String(st) => {
-                println!("{:?}", st);
-            }
-            ASTExpr::VarName(var_idx) => {
-                println!("var: {}", var_idx);
-            }
-            ASTExpr::FunctionCall(name, args) => {
-                println!("func: {}", name);
-                if let Some(args) = args {
-                    print_expr(args, indent + 1);
-                }
-            }
-            ASTExpr::Binary(op, f, s) => {
-                println!("op: {:?}", op);
-                print_expr(f, indent + 1);
-                print_expr(s, indent + 1);
-            }
-            ASTExpr::Neg(expr) => {
-                println!("neg of:");
-                print_expr(expr, indent + 1);
-            }
-        }
-    }
-
-    fn print_body(body: &ASTBody, indent: u64) {
-        print_indent(indent);
-        for statement in body {
-            match statement {
-                ASTStatement::SetVar {
-                    var,
-                    set_type,
-                    set_to,
-                } => {
-                    println!("Var {} set: {:?}", var, set_type);
-                    print_expr(set_to, indent + 1);
-                }
-                ASTStatement::If { condition, body } => {
-                    println!("If:");
-                    print_expr(condition, indent + 1);
-                    print_indent(indent);
-                    println!("Then:");
-                    print_body(body, indent + 1);
-                }
-                ASTStatement::While { condition, body } => {
-                    println!("While:");
-                    print_expr(condition, indent + 1);
-                    print_indent(indent);
-                    println!("Do:");
-                    print_body(body, indent + 1);
-                }
-                ASTStatement::EvalExpr(expr) => {
-                    println!("Eval following:");
-                    print_expr(expr, indent + 1);
-                }
-            }
-        }
-    }
-
-    print_body(body, 0);
-}
-
 type TokenIter<'a> = std::slice::Iter<'a, Token>;
+
+pub fn check_that_ast_is_correct(body: &ASTBody) {
+    #[derive(Debug, PartialEq, Eq)]
+    enum Type {
+        Number,
+        String,
+        Unit,
+    }
+    fn type_of_expr(expr: &ASTExpr) -> Type {
+        match expr {
+            ASTExpr::Number(_) => {
+                // very correct, certainly a number is correct right?
+                Type::Number
+            }
+            ASTExpr::String(_) => {
+                // probs correct
+                Type::String
+            }
+            ASTExpr::VarName(_var_idx) => Type::Number,
+            ASTExpr::FunctionCall(_func_idx, optional_expr) => {
+                if let Some(func_expr) = optional_expr {
+                    type_of_expr(func_expr);
+                }
+                Type::Unit
+            }
+            ASTExpr::Binary(op, expr0, expr1) => {
+                let type0 = type_of_expr(expr0);
+                let type1 = type_of_expr(expr1);
+                match op {
+                    BinaryOp::Argument => {
+                        Type::Unit
+                    }
+                    _ => {
+                        // both have to be numbers
+                        assert_eq!(Type::Number, type0);
+                        assert_eq!(Type::Number, type1);
+                        Type::Number
+                    }
+                }
+            }
+        }
+    }
+
+    for statement in body {
+        match statement {
+            ASTStatement::SetVar { set_to, .. } => {
+                type_of_expr(set_to);
+            }
+            ASTStatement::If { condition, body } => {
+                type_of_expr(condition);
+                check_that_ast_is_correct(body);
+            }
+            ASTStatement::While { condition, body } => {
+                type_of_expr(condition);
+                check_that_ast_is_correct(body);
+            }
+            ASTStatement::EvalExpr(expr) => {
+                type_of_expr(expr);
+            }
+        }
+    }
+}
 
 /// Parse generalized tokens. Probably statements.
 /// Variable name => Set it to expression
 /// If => generate If node
-
 pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
     let mut statements = ASTBody::new();
     let mut push_to_statements = |statement| {
@@ -300,4 +284,77 @@ fn parse_tokens_expression(tokens: &mut TokenIter) -> Option<ASTExpr> {
         },
         None => Some(first_part),
     }
+}
+
+pub fn print_ast(body: &ASTBody) {
+    fn print_indent(indent: u64) {
+        for _ in 0..(indent * 2) {
+            print!(" ");
+        }
+    }
+
+    fn print_expr(expr: &ASTExpr, indent: u64) {
+        print_indent(indent);
+        match expr {
+            ASTExpr::Number(num) => {
+                println!("{:?}", num);
+            }
+            ASTExpr::String(st) => {
+                println!("{:?}", st);
+            }
+            ASTExpr::VarName(var_idx) => {
+                println!("var: {}", var_idx);
+            }
+            ASTExpr::FunctionCall(name, args) => {
+                println!("func: {}", name);
+                if let Some(args) = args {
+                    print_expr(args, indent + 1);
+                }
+            }
+            ASTExpr::Binary(op, f, s) => {
+                println!("op: {:?}", op);
+                print_expr(f, indent + 1);
+                print_expr(s, indent + 1);
+            } // ASTExpr::Neg(expr) => {
+              //     println!("neg of:");
+              //     print_expr(expr, indent + 1);
+              // }
+        }
+    }
+
+    fn print_body(body: &ASTBody, indent: u64) {
+        print_indent(indent);
+        for statement in body {
+            match statement {
+                ASTStatement::SetVar {
+                    var,
+                    set_type,
+                    set_to,
+                } => {
+                    println!("Var {} set: {:?}", var, set_type);
+                    print_expr(set_to, indent + 1);
+                }
+                ASTStatement::If { condition, body } => {
+                    println!("If:");
+                    print_expr(condition, indent + 1);
+                    print_indent(indent);
+                    println!("Then:");
+                    print_body(body, indent + 1);
+                }
+                ASTStatement::While { condition, body } => {
+                    println!("While:");
+                    print_expr(condition, indent + 1);
+                    print_indent(indent);
+                    println!("Do:");
+                    print_body(body, indent + 1);
+                }
+                ASTStatement::EvalExpr(expr) => {
+                    println!("Eval following:");
+                    print_expr(expr, indent + 1);
+                }
+            }
+        }
+    }
+
+    print_body(body, 0);
 }

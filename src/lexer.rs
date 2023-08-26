@@ -1,8 +1,9 @@
 use crate::FunctionNameIdx;
 use crate::Keyword;
-use crate::Token;
 use crate::SetType;
+use crate::Token;
 use crate::VariableNameIdx;
+use crate::FUNCTION_PREFIX;
 use crate::STRING_DELIMITER;
 use crate::VARIABLE_PREFIX;
 
@@ -20,6 +21,7 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
         map.insert("FORM", Keyword::CreateVar);
         map.insert("IF", Keyword::If);
         map.insert("WHILE", Keyword::While);
+        map.insert("END", Keyword::End);
         map.insert("===", Keyword::Set(SetType::Set));
         map.insert("+==", Keyword::Set(SetType::Add));
         map.insert("-==", Keyword::Set(SetType::Sub));
@@ -125,7 +127,7 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
                 }
             }
             // a function call
-            '@' => {
+            FUNCTION_PREFIX => {
                 for (new_idx, new_ch) in &mut chars {
                     if !new_ch.is_ascii_lowercase() {
                         let func_name = &content[idx..new_idx];
@@ -149,9 +151,19 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
             _ => {
                 match ch {
                     '\n' => add_token(Token::NewLine),
-                    ',' => add_token(Token::Keyword(Keyword::Comma)),
-                    '(' => add_token(Token::Keyword(Keyword::StartParen)),
-                    ')' => add_token(Token::Keyword(Keyword::EndParen)),
+                    ',' => {
+                        add_token(Token::Keyword(Keyword::EndParen));
+                        add_token(Token::Keyword(Keyword::Comma));
+                        add_token(Token::Keyword(Keyword::StartParen));
+                    }
+                    '(' => {
+                        add_token(Token::Keyword(Keyword::StartParen));
+                        add_token(Token::Keyword(Keyword::StartParen));
+                    }
+                    ')' => {
+                        add_token(Token::Keyword(Keyword::EndParen));
+                        add_token(Token::Keyword(Keyword::EndParen));
+                    }
                     '*' => add_token(Token::Keyword(Keyword::Multiply)),
                     _ => (),
                 }

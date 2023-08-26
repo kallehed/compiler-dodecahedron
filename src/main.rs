@@ -9,23 +9,28 @@ fn main() {
             println!("arg: {}", arg);
             break 'vall arg;
         }
-        "please-give-file-to-compile".to_string()
+        "code.dode".to_string()
     };
 
     assert!(file_name.ends_with(".dode"));
 
     let content = std::fs::read_to_string(file_name).expect("file does not exist!");
 
-    println!(" --- STARTING LEXING!");
+    println!(" \n--- STARTING LEXING!");
     let tokens = lexer::generate_tokens(&content);
     println!("tokens: {:?}", tokens);
 
-    println!(" --- STARTING PARSING!");
-    let ast = parser::parse_tokens(&tokens);
+    println!(" \n--- STARTING PARSING!");
+    let ast = parser::parse_block(&mut tokens.iter());
+    println!("\n FINAL AST: {:?}", ast);
+
+    println!("\n tree version: \n");
+    parser::print_ast(&ast);
 }
 
 const STRING_DELIMITER: char = '"';
 const VARIABLE_PREFIX: char = '$';
+const FUNCTION_PREFIX: char = '@';
 
 type VariableNameIdx = u8;
 type FunctionNameIdx = u16;
@@ -45,6 +50,8 @@ pub enum Keyword {
     CreateVar,
     If,
     While,
+    // for ending a block
+    End,
     Set(SetType),
     Equals,
     Plus,

@@ -1,15 +1,15 @@
 
-	FORM $my_var === (343) + 34 + "bad num"
-	$my_var +== @add(1,2,3, "le string")
-	FORM $other_var === 1 + (2 * 3) + 4 * 5 + 6 * 7
-	FORM $tis_var === (1+(2))*3
-	IF $my_var = 34 
-		@print($my_var, 1+2+3+4, 5)
-	END
+FORM WHOLE $my_var === (343) + 34 + 1
+$my_var +== @add(1,2,3, "le string")
+FORM WHOLE $other_var === 1 + (2 * 3) + 4 * 5 + 6 * 7
+FORM WHOLE $tis_var === (1+(2))*3
+IF $my_var = 34 
+	@print($my_var, 1+2+3+4, 5)
+END
 
 
-	WHILE $my_var + 3 = 3
-		@print($my_var)
+WHILE $my_var + 3 = 3
+	@print($my_var)
 
 
-	END
+END

@@ -41,7 +41,7 @@ type FunctionNameIdx = u16;
 #[derive(Debug)]
 pub enum Token {
     String(&'static str),
-    Number(i64),
+    Whole(i64),
     Keyword(Keyword),
     VariableName(VariableNameIdx),
     FunctionName(FunctionNameIdx),
@@ -53,6 +53,7 @@ pub enum Keyword {
     CreateVar,
     If,
     While,
+    Type(Type),
     // for ending a block
     End,
     Set(SetType),
@@ -63,6 +64,16 @@ pub enum Keyword {
     StartParen,
     EndParen,
     Comma,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum Type {
+    // Integer
+    Whole,
+    // Float 64
+    Real,
+    String,
+    Unit,
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -6,6 +6,7 @@ use crate::VariableNameIdx;
 use crate::FUNCTION_PREFIX;
 use crate::STRING_DELIMITER;
 use crate::VARIABLE_PREFIX;
+use crate::Type;
 
 /// lexer
 pub fn generate_tokens(content: &str) -> Vec<Token> {
@@ -19,6 +20,9 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
     let str_to_keyword = {
         let mut map = std::collections::HashMap::new();
         map.insert("FORM", Keyword::CreateVar);
+        map.insert("WHOLE", Keyword::Type(Type::Whole));
+        map.insert("REAL", Keyword::Type(Type::Real));
+        map.insert("REAL", Keyword::CreateVar);
         map.insert("IF", Keyword::If);
         map.insert("WHILE", Keyword::While);
         map.insert("END", Keyword::End);
@@ -88,7 +92,7 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
                 // numbers
                 let (new_idx, new_ch) = lex_number(&mut chars);
                 let num_str = &content[idx..new_idx];
-                add_token(Token::Number(num_str.parse::<_>().unwrap()));
+                add_token(Token::Whole(num_str.parse::<_>().unwrap()));
                 (idx, ch) = (new_idx, new_ch);
             }
             chh if is_part_of_keyword(chh) => {

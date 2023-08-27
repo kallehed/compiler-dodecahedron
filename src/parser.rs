@@ -2,6 +2,7 @@ use crate::FunctionNameIdx;
 use crate::Keyword;
 use crate::SetType;
 use crate::Token;
+use crate::Type;
 use crate::VariableNameIdx;
 
 type ASTBox<T> = Box<T>;
@@ -17,9 +18,23 @@ pub enum BinaryOp {
     Equals,
 }
 
+type OperPrecedence = u8;
+
+impl BinaryOp {
+    fn precedence(self) -> OperPrecedence {
+        match self {
+            BinaryOp::Argument => 1,
+            BinaryOp::Add => 3,
+            BinaryOp::Sub => 3,
+            BinaryOp::Multiply => 4,
+            BinaryOp::Equals => 2,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ASTExpr {
-    Number(i64),
+    Whole(i64),
     String(&'static str),
     VarName(VariableNameIdx),
     FunctionCall(FunctionNameIdx, Option<ASTBox<ASTExpr>>),
@@ -27,12 +42,16 @@ pub enum ASTExpr {
 }
 
 #[derive(Debug)]
+pub struct ASTSetVar {
+    var_idx: VariableNameIdx,
+    set_type: SetType, // === or +== or -==
+    set_to: ASTBox<ASTExpr>,
+}
+
+#[derive(Debug)]
 pub enum ASTStatement {
-    SetVar {
-        var: VariableNameIdx,
-        set_type: SetType,
-        set_to: ASTBox<ASTExpr>,
-    },
+    CreateVar(Type, ASTSetVar),
+    SetVar(ASTSetVar),
     If {
         condition: ASTBox<ASTExpr>,
         body: ASTBody,
@@ -47,23 +66,17 @@ pub enum ASTStatement {
 type TokenIter<'a> = std::slice::Iter<'a, Token>;
 
 pub fn check_that_ast_is_correct(body: &ASTBody) {
-    #[derive(Debug, PartialEq, Eq)]
-    enum Type {
-        Number,
-        String,
-        Unit,
-    }
     fn type_of_expr(expr: &ASTExpr) -> Type {
         match expr {
-            ASTExpr::Number(_) => {
+            ASTExpr::Whole(_) => {
                 // very correct, certainly a number is correct right?
-                Type::Number
+                Type::Whole
             }
             ASTExpr::String(_) => {
                 // probs correct
                 Type::String
             }
-            ASTExpr::VarName(_var_idx) => Type::Number,
+            ASTExpr::VarName(_var_idx) => Type::Whole,
             ASTExpr::FunctionCall(_func_idx, optional_expr) => {
                 if let Some(func_expr) = optional_expr {
                     type_of_expr(func_expr);
@@ -74,14 +87,12 @@ pub fn check_that_ast_is_correct(body: &ASTBody) {
                 let type0 = type_of_expr(expr0);
                 let type1 = type_of_expr(expr1);
                 match op {
-                    BinaryOp::Argument => {
-                        Type::Unit
-                    }
+                    BinaryOp::Argument => Type::Unit,
                     _ => {
                         // both have to be numbers
-                        assert_eq!(Type::Number, type0);
-                        assert_eq!(Type::Number, type1);
-                        Type::Number
+                        assert_eq!(Type::Whole, type0);
+                        assert_eq!(Type::Whole, type1);
+                        Type::Whole
                     }
                 }
             }
@@ -90,7 +101,11 @@ pub fn check_that_ast_is_correct(body: &ASTBody) {
 
     for statement in body {
         match statement {
-            ASTStatement::SetVar { set_to, .. } => {
+            ASTStatement::CreateVar(type_id, set_var) => {
+                let expr_type = type_of_expr(&set_var.set_to);
+                assert_eq!(*type_id, expr_type);
+            }
+            ASTStatement::SetVar(ASTSetVar { set_to, .. }) => {
                 type_of_expr(set_to);
             }
             ASTStatement::If { condition, body } => {
@@ -118,31 +133,50 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
         statements.push(statement)
     };
 
+    fn parse_variable(tokens: &mut TokenIter, var_idx: VariableNameIdx) -> ASTSetVar {
+        // next token has to be a setter
+        match tokens.next().unwrap() {
+            &Token::Keyword(Keyword::Set(set_type)) => {
+                // correct.
+                ASTSetVar {
+                    set_type,
+                    var_idx,
+                    set_to: Box::new(
+                        parse_tokens_expression(tokens)
+                            .expect("No expression after trying to set variable!"),
+                    ),
+                }
+            }
+            _ => panic!("Bad token after variable name"),
+        }
+    }
+
     loop {
         let token = match tokens.next() {
             Some(t) => t,
             None => return statements,
         };
         match token {
-            &Token::Keyword(Keyword::CreateVar) => {}
-            // for setting an already created variable
-            &Token::VariableName(var) => {
-                // next token has to be a setter
+            &Token::Keyword(Keyword::CreateVar) => {
+                // Next token should be type
                 match tokens.next().unwrap() {
-                    &Token::Keyword(Keyword::Set(set_type)) => {
-                        // correct.
-                        let ast_statement = ASTStatement::SetVar {
-                            set_type,
-                            var,
-                            set_to: Box::new(
-                                parse_tokens_expression(tokens)
-                                    .expect("No expression after trying to set variable!"),
-                            ),
-                        };
-                        push_to_statements(ast_statement);
-                    }
-                    _ => panic!("Bad token after variable name"),
+                    Token::Keyword(Keyword::Type(Type::Whole)) => match tokens.next().unwrap() {
+                        // get variable name
+                        &Token::VariableName(var_idx) => {
+                            let ast_set = parse_variable(tokens, var_idx);
+                            let statement = ASTStatement::CreateVar(Type::Whole, ast_set);
+                            push_to_statements(statement);
+                        }
+                        bad => panic!("bad token after creating var and giving type: {:?}", bad),
+                    },
+                    bad => panic!("Invalid token after creating variable: {:?}", bad),
                 }
+            }
+            // for setting an already created variable
+            &Token::VariableName(var_idx) => {
+                let ast_set = parse_variable(tokens, var_idx);
+                let statement = ASTStatement::SetVar(ast_set);
+                push_to_statements(statement);
             }
             // If statement
             Token::Keyword(Keyword::If) => {
@@ -196,9 +230,9 @@ fn parse_function_call(func_idx: FunctionNameIdx, tokens: &mut TokenIter) -> AST
 }
 fn parse_value(tokens: &mut TokenIter) -> Option<ASTExpr> {
     match tokens.next().unwrap() {
-        &Token::Number(num) => {
+        &Token::Whole(num) => {
             // we got a number, now we must find an operator
-            Some(ASTExpr::Number(num))
+            Some(ASTExpr::Whole(num))
         }
         &Token::VariableName(var_name) => Some(ASTExpr::VarName(var_name)),
         &Token::FunctionName(func_idx) => Some(parse_function_call(func_idx, tokens)),
@@ -238,52 +272,51 @@ fn parse_oper(tokens: &mut TokenIter) -> Option<BinaryOp> {
     }
 }
 
+fn parse_oper_and_value(
+    tokens: &mut TokenIter,
+    value: ASTExpr,
+    precedence: OperPrecedence,
+) -> Result<ASTExpr, OperPrecedence> {
+    match parse_oper(tokens) {
+        Some(op) => {
+            // BinaryOp::Argument => Some(first_part),
+            //BinaryOp::Multiply => {
+            let new_precedence = op.precedence();
+            // continue this style, getting deeper, don't have to exit yet
+            if new_precedence >= precedence {
+                let next_value = parse_value(tokens).unwrap();
+                let possible_ast = parse_oper_and_value(tokens, next_value, new_precedence);
+                Ok(ASTExpr::Binary(
+                    op,
+                    ASTBox::new(value),
+                    ASTBox::new(possible_ast.unwrap()),
+                ))
+            } else {
+                Err(new_precedence)
+            }
+
+            // _ => {
+            //     let a = ASTExpr::Binary(
+            //         op,
+            //         ASTBox::new(value),
+            //         ASTBox::new(
+            //             parse_tokens_expression(tokens).expect("Must be more after an operator!"),
+            //         ),
+            //     );
+            //     a
+            // }
+        }
+        None => Ok(value),
+    }
+}
+
 /// parse expression formed of tokens
 fn parse_tokens_expression(tokens: &mut TokenIter) -> Option<ASTExpr> {
-    let first_part = match parse_value(tokens) {
+    let value = match parse_value(tokens) {
         Some(v) => v,
         None => return None,
     };
-
-    match parse_oper(tokens) {
-        Some(op) => match op {
-            // BinaryOp::Argument => Some(first_part),
-            op @ BinaryOp::Multiply => {
-                let next_value = parse_value(tokens).expect("no value after operator * !");
-                let next_oper = parse_oper(tokens);
-                match next_oper {
-                    Some(op2) => Some(ASTExpr::Binary(
-                        op2,
-                        ASTBox::new(ASTExpr::Binary(
-                            op,
-                            ASTBox::new(first_part),
-                            ASTBox::new(next_value),
-                        )),
-                        ASTBox::new(
-                            parse_tokens_expression(tokens)
-                                .expect("Must be more after an operator!"),
-                        ),
-                    )),
-                    None => Some(ASTExpr::Binary(
-                        op,
-                        ASTBox::new(first_part),
-                        ASTBox::new(next_value),
-                    )),
-                }
-            }
-            _ => {
-                let a = Some(ASTExpr::Binary(
-                    op,
-                    ASTBox::new(first_part),
-                    ASTBox::new(
-                        parse_tokens_expression(tokens).expect("Must be more after an operator!"),
-                    ),
-                ));
-                a
-            }
-        },
-        None => Some(first_part),
-    }
+    Some(parse_oper_and_value(tokens, value, 0).unwrap())
 }
 
 pub fn print_ast(body: &ASTBody) {
@@ -296,7 +329,7 @@ pub fn print_ast(body: &ASTBody) {
     fn print_expr(expr: &ASTExpr, indent: u64) {
         print_indent(indent);
         match expr {
-            ASTExpr::Number(num) => {
+            ASTExpr::Whole(num) => {
                 println!("{:?}", num);
             }
             ASTExpr::String(st) => {
@@ -326,11 +359,25 @@ pub fn print_ast(body: &ASTBody) {
         print_indent(indent);
         for statement in body {
             match statement {
-                ASTStatement::SetVar {
-                    var,
+                ASTStatement::CreateVar(
+                    type_id,
+                    ASTSetVar {
+                        var_idx: var,
+                        set_type,
+                        set_to,
+                    },
+                ) => {
+                    println!(
+                        "CREATE type: {:?}, Var {} set: {:?}",
+                        type_id, var, set_type
+                    );
+                    print_expr(set_to, indent + 1);
+                }
+                ASTStatement::SetVar(ASTSetVar {
+                    var_idx: var,
                     set_type,
                     set_to,
-                } => {
+                }) => {
                     println!("Var {} set: {:?}", var, set_type);
                     print_expr(set_to, indent + 1);
                 }

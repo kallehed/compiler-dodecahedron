@@ -21,7 +21,7 @@ fn main() {
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let ast = parser::parse_block(&mut tokens.iter());
+    let ast = parser::parse_block(&mut tokens.iter().peekable());
     println!("\n FINAL AST: {:?}", ast);
 
     println!("\n tree version: \n");

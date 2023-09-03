@@ -9,26 +9,19 @@ type ASTBox<T> = Box<T>;
 type ASTVec<T> = Vec<T>;
 type ASTBody = ASTVec<ASTStatement>;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum BinaryOp {
-    Argument,
-    Add,
-    Sub,
-    Multiply,
-    Equals,
+    // numbers specify their precedence. Higher means it should be evaluated first
+    Argument = 0,
+    Equals = 1,
+    Add = 2,
+    Sub = 3,
+    Multiply = 4,
 }
 
-type OperPrecedence = u8;
-
 impl BinaryOp {
-    fn precedence(self) -> OperPrecedence {
-        match self {
-            BinaryOp::Argument => 1,
-            BinaryOp::Add => 3,
-            BinaryOp::Sub => 3,
-            BinaryOp::Multiply => 4,
-            BinaryOp::Equals => 2,
-        }
+    fn least() -> Self {
+        Self::Argument
     }
 }
 
@@ -63,7 +56,7 @@ pub enum ASTStatement {
     EvalExpr(ASTExpr), // for just evaulating an expression like a function call
 }
 
-type TokenIter<'a> = std::slice::Iter<'a, Token>;
+type TokenIter<'a> = std::iter::Peekable<std::slice::Iter<'a, Token>>;
 
 pub fn check_that_ast_is_correct(body: &ASTBody) {
     fn type_of_expr(expr: &ASTExpr) -> Type {
@@ -142,7 +135,7 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
                     set_type,
                     var_idx,
                     set_to: Box::new(
-                        parse_tokens_expression(tokens)
+                        parse_expression_start(tokens)
                             .expect("No expression after trying to set variable!"),
                     ),
                 }
@@ -180,7 +173,7 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
             }
             // If statement
             Token::Keyword(Keyword::If) => {
-                let cond = parse_tokens_expression(tokens).expect("No expression after if!");
+                let cond = parse_expression_start(tokens).expect("No expression after if!");
 
                 let body = parse_block(tokens);
 
@@ -192,7 +185,7 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
             }
             // While statement
             Token::Keyword(Keyword::While) => {
-                let cond = parse_tokens_expression(tokens).expect("No expression after if!");
+                let cond = parse_expression_start(tokens).expect("No expression after if!");
                 let body = parse_block(tokens);
                 let ast_statement = ASTStatement::While {
                     condition: ASTBox::new(cond),
@@ -222,12 +215,13 @@ fn parse_function_call(func_idx: FunctionNameIdx, tokens: &mut TokenIter) -> AST
             // first part
             ASTExpr::FunctionCall(
                 func_idx,
-                parse_tokens_expression(tokens).map(|x| ASTBox::new(x)),
+                parse_expression_start(tokens).map(|x| ASTBox::new(x)),
             )
         }
         bad => panic!("wrong token after function name: {:?}", bad),
     }
 }
+
 fn parse_value(tokens: &mut TokenIter) -> Option<ASTExpr> {
     match tokens.next().unwrap() {
         &Token::Whole(num) => {
@@ -238,7 +232,7 @@ fn parse_value(tokens: &mut TokenIter) -> Option<ASTExpr> {
         &Token::FunctionName(func_idx) => Some(parse_function_call(func_idx, tokens)),
         Token::String(st) => Some(ASTExpr::String(st)),
         Token::Keyword(Keyword::StartParen) => {
-            Some(parse_tokens_expression(tokens).expect("must be tokens inside parenthesis"))
+            Some(parse_expression_start(tokens).expect("must be tokens inside parenthesis"))
         }
         Token::NewLine => {
             // nothing here,
@@ -247,8 +241,9 @@ fn parse_value(tokens: &mut TokenIter) -> Option<ASTExpr> {
         bad => panic!("bad expression: {:?}", bad),
     }
 }
-fn parse_oper(tokens: &mut TokenIter) -> Option<BinaryOp> {
-    match tokens.next().unwrap() {
+
+fn parse_oper(token: &Token) -> Option<BinaryOp> {
+    match token {
         Token::Keyword(Keyword::Plus) => {
             return Some(BinaryOp::Add);
         }
@@ -272,51 +267,33 @@ fn parse_oper(tokens: &mut TokenIter) -> Option<BinaryOp> {
     }
 }
 
-fn parse_oper_and_value(
-    tokens: &mut TokenIter,
-    value: ASTExpr,
-    precedence: OperPrecedence,
-) -> Result<ASTExpr, OperPrecedence> {
-    match parse_oper(tokens) {
-        Some(op) => {
-            // BinaryOp::Argument => Some(first_part),
-            //BinaryOp::Multiply => {
-            let new_precedence = op.precedence();
-            // continue this style, getting deeper, don't have to exit yet
-            if new_precedence >= precedence {
-                let next_value = parse_value(tokens).unwrap();
-                let possible_ast = parse_oper_and_value(tokens, next_value, new_precedence);
-                Ok(ASTExpr::Binary(
-                    op,
-                    ASTBox::new(value),
-                    ASTBox::new(possible_ast.unwrap()),
-                ))
-            } else {
-                Err(new_precedence)
-            }
-
-            // _ => {
-            //     let a = ASTExpr::Binary(
-            //         op,
-            //         ASTBox::new(value),
-            //         ASTBox::new(
-            //             parse_tokens_expression(tokens).expect("Must be more after an operator!"),
-            //         ),
-            //     );
-            //     a
-            // }
+fn parse_expression(tokens: &mut TokenIter, mut lhs: ASTExpr, min_precedence: BinaryOp) -> ASTExpr {
+    let mut lookahead = parse_oper(tokens.peek().unwrap()).unwrap();
+    while lookahead >= min_precedence {
+        let op = lookahead;
+        tokens.next();
+        let mut rhs = parse_value(tokens).unwrap();
+        lookahead = match parse_oper(tokens.peek().unwrap()) {
+            Some(a) => a,
+            None => break,
+        };
+        while lookahead > op {
+            rhs = parse_expression(tokens, rhs, op);
+            lookahead = parse_oper(tokens.peek().unwrap()).unwrap();
         }
-        None => Ok(value),
+        lhs = ASTExpr::Binary(op, ASTBox::new(lhs), ASTBox::new(rhs));
     }
+    return lhs;
 }
 
+
 /// parse expression formed of tokens
-fn parse_tokens_expression(tokens: &mut TokenIter) -> Option<ASTExpr> {
+fn parse_expression_start(tokens: &mut TokenIter) -> Option<ASTExpr> {
     let value = match parse_value(tokens) {
         Some(v) => v,
         None => return None,
     };
-    Some(parse_oper_and_value(tokens, value, 0).unwrap())
+    Some(parse_expression(tokens, value, BinaryOp::least()))
 }
 
 pub fn print_ast(body: &ASTBody) {

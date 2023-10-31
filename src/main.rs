@@ -1,5 +1,6 @@
 mod lexer;
 mod parser;
+mod ast_interpreter;
 
 fn main() {
     println!("Hello, world!");
@@ -29,6 +30,10 @@ fn main() {
 
     println!("\n Correctness of AST pass: \n");
     parser::check_that_ast_is_correct(&ast);
+
+    println!("\n Now interpreting ast: \n");
+
+    ast_interpreter::run_ast(&ast);
 }
 
 const STRING_DELIMITER: char = '"';
@@ -39,10 +44,13 @@ const COMMENT_PREFIX: char = '#';
 type VariableNameIdx = u8;
 type FunctionNameIdx = u16;
 
+type ASTBody = Vec<parser::ASTStatement>;
+type Whole = i64;
+
 #[derive(Debug)]
 pub enum Token {
     String(&'static str),
-    Whole(i64),
+    Whole(Whole),
     Keyword(Keyword),
     VariableName(VariableNameIdx),
     FunctionName(FunctionNameIdx),

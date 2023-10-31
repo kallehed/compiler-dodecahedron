@@ -1,13 +1,13 @@
+use crate::ASTBody;
 use crate::FunctionNameIdx;
 use crate::Keyword;
 use crate::SetType;
 use crate::Token;
 use crate::Type;
 use crate::VariableNameIdx;
+use crate::Whole;
 
 type ASTBox<T> = Box<T>;
-type ASTVec<T> = Vec<T>;
-type ASTBody = ASTVec<ASTStatement>;
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum BinaryOp {
@@ -28,9 +28,6 @@ pub enum BinaryOp {
 type BinOpPrecedence = u8;
 
 impl BinaryOp {
-    fn least() -> Self {
-        unsafe { std::mem::transmute(0 as u8) }
-    }
     fn precedence(self) -> BinOpPrecedence {
         self as _
     }
@@ -38,10 +35,10 @@ impl BinaryOp {
 
 #[derive(Debug)]
 pub enum ASTExpr {
-    Whole(i64),
-    String(&'static str),
+    Whole(Whole),
+    _String(&'static str),
     VarName(VariableNameIdx),
-    FunctionCall(FunctionNameIdx, Option<ASTBox<ASTExpr>>),
+    _FunctionCall(FunctionNameIdx, Option<ASTBox<ASTExpr>>),
     Binary(BinaryOp, ASTBox<ASTExpr>, ASTBox<ASTExpr>),
 }
 
@@ -67,12 +64,12 @@ pub fn check_that_ast_is_correct(body: &ASTBody) {
                 // very correct, certainly a number is correct right?
                 Type::Whole
             }
-            ASTExpr::String(_) => {
+            ASTExpr::_String(_) => {
                 // probs correct
                 Type::String
             }
             ASTExpr::VarName(_var_idx) => Type::Whole,
-            ASTExpr::FunctionCall(_func_idx, optional_expr) => {
+            ASTExpr::_FunctionCall(_func_idx, optional_expr) => {
                 if let Some(func_expr) = optional_expr {
                     type_of_expr(func_expr);
                 }
@@ -129,7 +126,8 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
         let statement = match token {
             &Token::Keyword(Keyword::CreateVar) => {
                 // Next token should be type
-                let var_type = match tokens.next().unwrap() {
+                // type not currently used TODO
+                let _var_type = match tokens.next().unwrap() {
                     Token::Keyword(Keyword::Type(created_type)) => created_type,
                     bad => panic!("Invalid token after creating variable: {:?}", bad),
                 };
@@ -194,10 +192,22 @@ fn parse_expr(tokens: &mut TokenIter) -> ASTExpr {
             &Token::Whole(v) => ASTExpr::Whole(v),
             Token::Keyword(Keyword::StartParen) => {
                 // create new parse group here
-                match inner(tokens, 0) {InnerReturn::ASTThing(e) => e, _ => panic!("can't go back in parenthesis highest level???")}
+                match inner(tokens, 0) {
+                    InnerReturn::ASTThing(e) => e,
+                    _ => panic!("can't go back in parenthesis highest level???"),
+                }
             }
             &Token::VariableName(e) => ASTExpr::VarName(e),
-            Token::FunctionName(e) => panic!("no functions in my exprs: {:?}", e),
+            Token::FunctionName(name) => {
+                let Token::Keyword(Keyword::StartParen) = tokens.next().unwrap() else {
+                    panic!("No startparen after function name!");
+                };
+                match inner(tokens, 0) {
+                    InnerReturn::ASTThing(e) => ASTExpr::_FunctionCall(*name, Some(ASTBox::new(e))),
+                    _ => panic!("function paren not work!"),
+                }
+
+            }
             Token::NewLine => panic!("no value found?????"),
             Token::Keyword(bad) => panic!("no keywords in expressions: {:?}", bad),
         };
@@ -221,19 +231,29 @@ fn parse_expr(tokens: &mut TokenIter) -> ASTExpr {
         loop {
             match inner(tokens, precedence) {
                 InnerReturn::ASTThing(e) => {
-                    return InnerReturn::ASTThing(ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(e)));
+                    return InnerReturn::ASTThing(ASTExpr::Binary(
+                        our_binop,
+                        our_first_part,
+                        ASTBox::new(e),
+                    ));
                 }
                 InnerReturn::GoBack(lower_binop, expr) => {
                     if lower_binop.precedence() >= prev_precedence {
                         // combine, but we can continue. Contain our gotten expression into the new
                         // operator will will contain us (fine because previous precedence was
                         // similar)
-                        our_first_part = ASTBox::new(ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)));
+                        our_first_part = ASTBox::new(ASTExpr::Binary(
+                            our_binop,
+                            our_first_part,
+                            ASTBox::new(expr),
+                        ));
                         our_binop = lower_binop;
-                    }
-                    else {
+                    } else {
                         // too low precedence, must go back
-                        return InnerReturn::GoBack(lower_binop, ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)));
+                        return InnerReturn::GoBack(
+                            lower_binop,
+                            ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)),
+                        );
                     }
                 }
             }
@@ -256,7 +276,7 @@ fn parse_oper(token: &Token) -> Option<BinaryOp> {
         Token::Keyword(Keyword::Multiply) => {
             return Some(BinaryOp::Multiply);
         }
-        Token::Keyword(Keyword::Less)=> {
+        Token::Keyword(Keyword::Less) => {
             return Some(BinaryOp::Less);
         }
         Token::Keyword(Keyword::More) => {
@@ -298,13 +318,13 @@ pub fn print_ast(body: &ASTBody) {
             ASTExpr::Whole(num) => {
                 println!("{:?}", num);
             }
-            ASTExpr::String(st) => {
+            ASTExpr::_String(st) => {
                 println!("{:?}", st);
             }
             ASTExpr::VarName(var_idx) => {
                 println!("var: {}", var_idx);
             }
-            ASTExpr::FunctionCall(name, args) => {
+            ASTExpr::_FunctionCall(name, args) => {
                 println!("func: {}", name);
                 if let Some(args) = args {
                     print_expr(args, indent + 1);

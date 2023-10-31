@@ -12,16 +12,27 @@ type ASTBody = ASTVec<ASTStatement>;
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum BinaryOp {
     // numbers specify their precedence. Higher means it should be evaluated first
-    Argument = 0,
-    Equals = 1,
-    Add = 2,
-    Sub = 3,
-    Multiply = 4,
+    // ZERO is RESERVED for algorithm!!!!!!!!
+    SetAdd = 1,
+    SetSub = 2,
+    Set = 3,
+    Argument = 4,
+    Equals = 5,
+    Less = 6,
+    More = 7,
+    Add = 8,
+    Sub = 9,
+    Multiply = 10,
 }
+
+type BinOpPrecedence = u8;
 
 impl BinaryOp {
     fn least() -> Self {
-        Self::Argument
+        unsafe { std::mem::transmute(0 as u8) }
+    }
+    fn precedence(self) -> BinOpPrecedence {
+        self as _
     }
 }
 
@@ -35,16 +46,7 @@ pub enum ASTExpr {
 }
 
 #[derive(Debug)]
-pub struct ASTSetVar {
-    var_idx: VariableNameIdx,
-    set_type: SetType, // === or +== or -==
-    set_to: ASTBox<ASTExpr>,
-}
-
-#[derive(Debug)]
 pub enum ASTStatement {
-    CreateVar(Type, ASTSetVar),
-    SetVar(ASTSetVar),
     If {
         condition: ASTBox<ASTExpr>,
         body: ASTBody,
@@ -94,13 +96,6 @@ pub fn check_that_ast_is_correct(body: &ASTBody) {
 
     for statement in body {
         match statement {
-            ASTStatement::CreateVar(type_id, set_var) => {
-                let expr_type = type_of_expr(&set_var.set_to);
-                assert_eq!(*type_id, expr_type);
-            }
-            ASTStatement::SetVar(ASTSetVar { set_to, .. }) => {
-                type_of_expr(set_to);
-            }
             ASTStatement::If { condition, body } => {
                 type_of_expr(condition);
                 check_that_ast_is_correct(body);
@@ -126,119 +121,127 @@ pub fn parse_block(tokens: &mut TokenIter) -> ASTBody {
         statements.push(statement)
     };
 
-    fn parse_variable(tokens: &mut TokenIter, var_idx: VariableNameIdx) -> ASTSetVar {
-        // next token has to be a setter
-        match tokens.next().unwrap() {
-            &Token::Keyword(Keyword::Set(set_type)) => {
-                // correct.
-                ASTSetVar {
-                    set_type,
-                    var_idx,
-                    set_to: Box::new(
-                        parse_expression_start(tokens)
-                            .expect("No expression after trying to set variable!"),
-                    ),
-                }
-            }
-            _ => panic!("Bad token after variable name"),
-        }
-    }
-
     loop {
         let token = match tokens.next() {
             Some(t) => t,
             None => return statements,
         };
-        match token {
+        let statement = match token {
             &Token::Keyword(Keyword::CreateVar) => {
                 // Next token should be type
-                match tokens.next().unwrap() {
-                    Token::Keyword(Keyword::Type(Type::Whole)) => match tokens.next().unwrap() {
-                        // get variable name
-                        &Token::VariableName(var_idx) => {
-                            let ast_set = parse_variable(tokens, var_idx);
-                            let statement = ASTStatement::CreateVar(Type::Whole, ast_set);
-                            push_to_statements(statement);
-                        }
-                        bad => panic!("bad token after creating var and giving type: {:?}", bad),
-                    },
+                let var_type = match tokens.next().unwrap() {
+                    Token::Keyword(Keyword::Type(created_type)) => created_type,
                     bad => panic!("Invalid token after creating variable: {:?}", bad),
+                };
+                // get variable name
+                let var_idx = match tokens.next().unwrap() {
+                    &Token::VariableName(var_idx) => var_idx,
+                    bad => panic!("Should have given variable name, got: {:?}", bad),
+                };
+                // make sure there is a SET token after var name
+                match tokens.next().unwrap() {
+                    Token::Keyword(Keyword::Set(SetType::Set)) => (),
+                    bad => panic!("Should have given SET token, got: {:?}", bad),
                 }
-            }
-            // for setting an already created variable
-            &Token::VariableName(var_idx) => {
-                let ast_set = parse_variable(tokens, var_idx);
-                let statement = ASTStatement::SetVar(ast_set);
-                push_to_statements(statement);
+                // now there should be an expression
+                let expr = ASTBox::new(parse_expr(tokens));
+                ASTStatement::EvalExpr(ASTExpr::Binary(
+                    BinaryOp::Set,
+                    ASTBox::new(ASTExpr::VarName(var_idx)),
+                    expr,
+                ))
             }
             // If statement
             Token::Keyword(Keyword::If) => {
-                let cond = parse_expression_start(tokens).expect("No expression after if!");
-
+                let cond = parse_expr(tokens);
                 let body = parse_block(tokens);
-
-                let ast_statement = ASTStatement::If {
+                ASTStatement::If {
                     condition: ASTBox::new(cond),
                     body,
-                };
-                push_to_statements(ast_statement);
+                }
             }
             // While statement
             Token::Keyword(Keyword::While) => {
-                let cond = parse_expression_start(tokens).expect("No expression after if!");
+                let cond = parse_expr(tokens);
                 let body = parse_block(tokens);
-                let ast_statement = ASTStatement::While {
+                ASTStatement::While {
                     condition: ASTBox::new(cond),
                     body,
-                };
-                push_to_statements(ast_statement);
+                }
             }
-            &Token::FunctionName(func_idx) => {
-                // Call function
-                let ast_statement = ASTStatement::EvalExpr(parse_function_call(func_idx, tokens));
-                push_to_statements(ast_statement);
+            Token::Keyword(Keyword::Invoke) => {
+                let expr = parse_expr(tokens);
+                ASTStatement::EvalExpr(expr)
             }
             Token::Keyword(Keyword::End) => {
                 return statements;
             }
-            Token::NewLine => (),
+            Token::NewLine => continue,
 
             bad => panic!("Invalid token for start of statement: {:?}", bad),
-        }
+        };
+        push_to_statements(statement);
     }
 }
-
-fn parse_function_call(func_idx: FunctionNameIdx, tokens: &mut TokenIter) -> ASTExpr {
-    match tokens.next().unwrap() {
-        Token::Keyword(Keyword::StartParen) => {
-            // we have a function call, get the expression inside, and this will be the
-            // first part
-            ASTExpr::FunctionCall(
-                func_idx,
-                parse_expression_start(tokens).map(|x| ASTBox::new(x)),
-            )
-        }
-        bad => panic!("wrong token after function name: {:?}", bad),
+fn parse_expr(tokens: &mut TokenIter) -> ASTExpr {
+    enum InnerReturn {
+        ASTThing(ASTExpr),
+        GoBack(BinaryOp, ASTExpr),
     }
-}
+    fn inner(tokens: &mut TokenIter, prev_precedence: BinOpPrecedence) -> InnerReturn {
+        let value = match tokens.next().unwrap() {
+            Token::String(_) => panic!("no strings allowed in expressions"),
+            &Token::Whole(v) => ASTExpr::Whole(v),
+            Token::Keyword(Keyword::StartParen) => {
+                // create new parse group here
+                match inner(tokens, 0) {InnerReturn::ASTThing(e) => e, _ => panic!("can't go back in parenthesis highest level???")}
+            }
+            &Token::VariableName(e) => ASTExpr::VarName(e),
+            Token::FunctionName(e) => panic!("no functions in my exprs: {:?}", e),
+            Token::NewLine => panic!("no value found?????"),
+            Token::Keyword(bad) => panic!("no keywords in expressions: {:?}", bad),
+        };
 
-fn parse_value(tokens: &mut TokenIter) -> Option<ASTExpr> {
-    match tokens.next().unwrap() {
-        &Token::Whole(num) => {
-            // we got a number, now we must find an operator
-            Some(ASTExpr::Whole(num))
+        let binop = match parse_oper(tokens.next().unwrap()) {
+            Some(binop) => binop,
+            None => {
+                // no operator, return value
+                return InnerReturn::ASTThing(value);
+            }
+        };
+        let precedence = binop.precedence();
+        if precedence < prev_precedence {
+            // we have to back and collect things in this "precedence block"
+            return InnerReturn::GoBack(binop, value);
         }
-        &Token::VariableName(var_name) => Some(ASTExpr::VarName(var_name)),
-        &Token::FunctionName(func_idx) => Some(parse_function_call(func_idx, tokens)),
-        Token::String(st) => Some(ASTExpr::String(st)),
-        Token::Keyword(Keyword::StartParen) => {
-            Some(parse_expression_start(tokens).expect("must be tokens inside parenthesis"))
+
+        let mut our_first_part = ASTBox::new(value);
+        let mut our_binop = binop;
+
+        loop {
+            match inner(tokens, precedence) {
+                InnerReturn::ASTThing(e) => {
+                    return InnerReturn::ASTThing(ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(e)));
+                }
+                InnerReturn::GoBack(lower_binop, expr) => {
+                    if lower_binop.precedence() >= prev_precedence {
+                        // combine, but we can continue. Contain our gotten expression into the new
+                        // operator will will contain us (fine because previous precedence was
+                        // similar)
+                        our_first_part = ASTBox::new(ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)));
+                        our_binop = lower_binop;
+                    }
+                    else {
+                        // too low precedence, must go back
+                        return InnerReturn::GoBack(lower_binop, ASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)));
+                    }
+                }
+            }
         }
-        Token::NewLine => {
-            // nothing here,
-            return None;
-        }
-        bad => panic!("bad expression: {:?}", bad),
+    }
+    match inner(tokens, 0) {
+        InnerReturn::ASTThing(expr) => return expr,
+        InnerReturn::GoBack(_, _) => panic!("Can't go back in highest level???"),
     }
 }
 
@@ -253,47 +256,33 @@ fn parse_oper(token: &Token) -> Option<BinaryOp> {
         Token::Keyword(Keyword::Multiply) => {
             return Some(BinaryOp::Multiply);
         }
+        Token::Keyword(Keyword::Less)=> {
+            return Some(BinaryOp::Less);
+        }
+        Token::Keyword(Keyword::More) => {
+            return Some(BinaryOp::More);
+        }
         Token::Keyword(Keyword::Equals) => {
             return Some(BinaryOp::Equals);
         }
         Token::Keyword(Keyword::Comma) => {
             return Some(BinaryOp::Argument);
         }
+        Token::Keyword(Keyword::Set(SetType::Set)) => {
+            return Some(BinaryOp::Set);
+        }
+        Token::Keyword(Keyword::Set(SetType::Add)) => {
+            return Some(BinaryOp::SetAdd);
+        }
+        Token::Keyword(Keyword::Set(SetType::Sub)) => {
+            return Some(BinaryOp::SetSub);
+        }
         Token::NewLine | Token::Keyword(Keyword::EndParen) => {
             // nothing more
             return None;
         }
-        bad => panic!("Bad token after first part: {:?}, ", bad),
+        bad => panic!("Bad operator token: {:?}, ", bad),
     }
-}
-
-fn parse_expression(tokens: &mut TokenIter, mut lhs: ASTExpr, min_precedence: BinaryOp) -> ASTExpr {
-    let mut lookahead = parse_oper(tokens.peek().unwrap()).unwrap();
-    while lookahead >= min_precedence {
-        let op = lookahead;
-        tokens.next();
-        let mut rhs = parse_value(tokens).unwrap();
-        lookahead = match parse_oper(tokens.peek().unwrap()) {
-            Some(a) => a,
-            None => break,
-        };
-        while lookahead > op {
-            rhs = parse_expression(tokens, rhs, op);
-            lookahead = parse_oper(tokens.peek().unwrap()).unwrap();
-        }
-        lhs = ASTExpr::Binary(op, ASTBox::new(lhs), ASTBox::new(rhs));
-    }
-    return lhs;
-}
-
-
-/// parse expression formed of tokens
-fn parse_expression_start(tokens: &mut TokenIter) -> Option<ASTExpr> {
-    let value = match parse_value(tokens) {
-        Some(v) => v,
-        None => return None,
-    };
-    Some(parse_expression(tokens, value, BinaryOp::least()))
 }
 
 pub fn print_ast(body: &ASTBody) {
@@ -336,28 +325,6 @@ pub fn print_ast(body: &ASTBody) {
         print_indent(indent);
         for statement in body {
             match statement {
-                ASTStatement::CreateVar(
-                    type_id,
-                    ASTSetVar {
-                        var_idx: var,
-                        set_type,
-                        set_to,
-                    },
-                ) => {
-                    println!(
-                        "CREATE type: {:?}, Var {} set: {:?}",
-                        type_id, var, set_type
-                    );
-                    print_expr(set_to, indent + 1);
-                }
-                ASTStatement::SetVar(ASTSetVar {
-                    var_idx: var,
-                    set_type,
-                    set_to,
-                }) => {
-                    println!("Var {} set: {:?}", var, set_type);
-                    print_expr(set_to, indent + 1);
-                }
                 ASTStatement::If { condition, body } => {
                     println!("If:");
                     print_expr(condition, indent + 1);

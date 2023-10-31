@@ -34,6 +34,7 @@ fn main() {
 const STRING_DELIMITER: char = '"';
 const VARIABLE_PREFIX: char = '$';
 const FUNCTION_PREFIX: char = '@';
+const COMMENT_PREFIX: char = '#';
 
 type VariableNameIdx = u8;
 type FunctionNameIdx = u16;
@@ -56,11 +57,15 @@ pub enum Keyword {
     Type(Type),
     // for ending a block
     End,
+    // for running an expression
+    Invoke,
     Set(SetType),
     Equals,
     Plus,
     Minus,
     Multiply,
+    Less,
+    More,
     StartParen,
     EndParen,
     Comma,

@@ -2,16 +2,17 @@ use crate::FunctionNameIdx;
 use crate::Keyword;
 use crate::SetType;
 use crate::Token;
+use crate::Type;
 use crate::VariableNameIdx;
+use crate::COMMENT_PREFIX;
 use crate::FUNCTION_PREFIX;
 use crate::STRING_DELIMITER;
 use crate::VARIABLE_PREFIX;
-use crate::Type;
 
 /// lexer
 pub fn generate_tokens(content: &str) -> Vec<Token> {
     fn is_part_of_keyword(ch: char) -> bool {
-        ch.is_ascii_uppercase() || ch == '=' || ch == '-' || ch == '+'
+        ch.is_ascii_uppercase() || ch == '=' || ch == '-' || ch == '+' || ch == '<' || ch == '>'
     }
     fn char_is_valid_var_name(ch: char) -> bool {
         ch.is_ascii_lowercase() || ch == '_'
@@ -26,12 +27,15 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
         map.insert("IF", Keyword::If);
         map.insert("WHILE", Keyword::While);
         map.insert("END", Keyword::End);
+        map.insert("INVOKE", Keyword::Invoke);
         map.insert("===", Keyword::Set(SetType::Set));
         map.insert("+==", Keyword::Set(SetType::Add));
         map.insert("-==", Keyword::Set(SetType::Sub));
         map.insert("=", Keyword::Equals);
         map.insert("+", Keyword::Plus);
         map.insert("-", Keyword::Minus);
+        map.insert("<", Keyword::Less);
+        map.insert(">", Keyword::More);
         map
     };
     // to return
@@ -76,6 +80,15 @@ pub fn generate_tokens(content: &str) -> Vec<Token> {
         let mut get_a_new_char = false;
 
         match ch {
+            COMMENT_PREFIX => { // don't care until newline
+                for (new_idx, new_ch) in &mut chars {
+                    if new_ch == '\n' {
+                        (idx, ch) = (new_idx, new_ch);
+                        get_a_new_char = true;
+                        break;
+                    }
+                }
+            }
             STRING_DELIMITER => {
                 // strings
                 for (new_idx, new_ch) in &mut chars {

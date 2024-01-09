@@ -45,12 +45,12 @@ type VariableNameIdx = u8;
 type FunctionNameIdx = u16;
 
 type ASTBody = Vec<parser::ASTStatement>;
-type Whole = i64;
+type Int = i64;
 
 #[derive(Debug)]
 pub enum Token {
     String(&'static str),
-    Whole(Whole),
+    Int(Int),
     Keyword(Keyword),
     VariableName(VariableNameIdx),
     FunctionName(FunctionNameIdx),

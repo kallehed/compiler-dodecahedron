@@ -5,7 +5,7 @@ use crate::SetType;
 use crate::Token;
 use crate::Type;
 use crate::VariableNameIdx;
-use crate::Whole;
+use crate::Int;
 
 type ASTBox<T> = Box<T>;
 
@@ -35,7 +35,7 @@ impl BinaryOp {
 
 #[derive(Debug)]
 pub enum ASTExpr {
-    Whole(Whole),
+    Whole(Int),
     _String(&'static str),
     VarName(VariableNameIdx),
     _FunctionCall(FunctionNameIdx, Option<ASTBox<ASTExpr>>),
@@ -189,7 +189,7 @@ fn parse_expr(tokens: &mut TokenIter) -> ASTExpr {
     fn inner(tokens: &mut TokenIter, prev_precedence: BinOpPrecedence) -> InnerReturn {
         let value = match tokens.next().unwrap() {
             Token::String(_) => panic!("no strings allowed in expressions"),
-            &Token::Whole(v) => ASTExpr::Whole(v),
+            &Token::Int(v) => ASTExpr::Whole(v),
             Token::Keyword(Keyword::StartParen) => {
                 // create new parse group here
                 match inner(tokens, 0) {

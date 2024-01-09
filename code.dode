@@ -1,19 +1,22 @@
 
-INVOKE $my_var === 1 + 3 * 2 + 9 + 8 * 2
+fn main() {
+    let my_var : int = 1 + 3 * 2 + 9 + 8 * 2;
 
-INVOKE $other_var === 1 + (2 * 3) + 4 * 5 + 6 * 7
-INVOKE $tis_var === (1+(2))*3
+    let other_var : int = 1 + (2 * 3) + 4 * 5 + 6 * 7;
+    let tis_var : int = (1+(2))*3;
 
-INVOKE @print(0*0)
+    print(0 * 1);
 
-IF $my_var < 34 
-    INVOKE $new_var === 23 + 34 = 57
-END
+    if $my_var < 34 {
+        let new_var = 23 + 34 = 57;
+    }
 
-#IF $my_var = 34 
-#	INVOKE @print($my_var, 1+2+3+4, 5)
-#END
+    #IF $my_var = 34 
+    #	INVOKE @print($my_var, 1+2+3+4, 5);
+    #END
 
-#WHILE $my_var < 10
-#  INVOKE $my_var +== 1
-#END
+    #WHILE $my_var < 10
+    #  INVOKE $my_var +== 1;
+    #END
+}
+

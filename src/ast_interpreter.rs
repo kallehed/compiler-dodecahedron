@@ -1,16 +1,16 @@
 use crate::parser::{ASTExpr, ASTStatement, BinaryOp};
-use crate::{ASTBody, VariableNameIdx, Whole};
+use crate::{ASTBody, VariableNameIdx, Int};
 
 #[derive(Default)]
 struct Interpreter {
-    wholes: std::collections::HashMap<VariableNameIdx, Whole>,
+    wholes: std::collections::HashMap<VariableNameIdx, Int>,
 }
 
 impl Interpreter {
-    fn set_whole(&mut self, name: VariableNameIdx, val: Whole) {
+    fn set_whole(&mut self, name: VariableNameIdx, val: Int) {
         self.wholes.insert(name, val);
     }
-    fn get_whole(&mut self, name: VariableNameIdx) -> Whole {
+    fn get_whole(&mut self, name: VariableNameIdx) -> Int {
         *self.wholes.get(&name).unwrap()
     }
 }
@@ -22,7 +22,7 @@ pub fn run_ast(ast: &ASTBody) {
 }
 
 fn run_ast_with_interp(interp: &mut Interpreter, ast: &ASTBody) {
-    fn run_expr(interp: &mut Interpreter, expr: &ASTExpr) -> Whole {
+    fn run_expr(interp: &mut Interpreter, expr: &ASTExpr) -> Int {
         match expr {
             &ASTExpr::Whole(whole) => return whole,
             ASTExpr::_String(_s) => todo!(),

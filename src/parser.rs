@@ -17,13 +17,12 @@ pub enum BinaryOp {
     SetAdd = 1,
     SetSub = 2,
     Set = 3,
-    Argument = 4,
-    Equals = 5,
-    Less = 6,
-    More = 7,
-    Add = 8,
-    Sub = 9,
-    Multiply = 10,
+    Equals = 4,
+    Less = 5,
+    More = 6,
+    Add = 7,
+    Sub = 8,
+    Multiply = 9,
 }
 
 type BinOpPrecedence = u8;
@@ -119,15 +118,17 @@ struct Parser<'parser_lifetime> {
     token_idx_to_char_nr: &'parser_lifetime Vec<(usize, usize)>,
 
     source: &'parser_lifetime str,
+    file_name: &'parser_lifetime str,
 }
 
 pub fn parse(
     tokens: &Vec<Token>,
     token_idx_to_char_nr: &Vec<(usize, usize)>,
     source: &str,
+    file_name: &str,
 ) -> ASTBody {
     let mut token_iter = tokens.iter().enumerate().peekable();
-    let mut parser = Parser::new(&mut token_iter, token_idx_to_char_nr, source);
+    let mut parser = Parser::new(&mut token_iter, token_idx_to_char_nr, source, file_name);
     parser.parse_scope()
 }
 enum InnerReturn {
@@ -142,11 +143,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         >,
         token_idx_to_char_nr: &'parser_lifetime Vec<(usize, usize)>,
         source: &'parser_lifetime str,
+        file_name: &'parser_lifetime str,
     ) -> Self {
         Parser {
             tokens,
-            token_idx_to_char_nr: token_idx_to_char_nr,
+            token_idx_to_char_nr,
             source,
+            file_name,
         }
     }
     fn eat(&mut self) -> Option<(usize, &Token)> {
@@ -164,10 +167,11 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         _bad_tok: &Token,
         token_start_pos: usize,
     ) -> ! {
-        let (start_wher, end_wher) = self.token_idx_to_char_nr[token_start_pos];
+        let (start_wher, _end_wher) = self.token_idx_to_char_nr[token_start_pos];
 
         let mut line = 1;
         let mut col = 1;
+        let mut latest_start_of_newline = 0;
         for (idx, ch) in self.source.chars().enumerate() {
             if idx == start_wher {
                 break;
@@ -175,15 +179,52 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             if ch == '\n' {
                 line += 1;
                 col = 1;
+                latest_start_of_newline = idx + 1;
             } else {
                 col += 1;
             }
         }
+        // get string for line by iterating over chars again
+        let line_str = {
+            let mut end_of_line = 0;
+            for (idx, ch) in self.source.chars().enumerate() {
+                if idx > latest_start_of_newline && ch == '\n' {
+                    // found end of line
+                    end_of_line = idx;
+                    break;
+                }
+            }
+            &self.source[latest_start_of_newline..end_of_line]
+        };
 
-        println!("Parse error: `{}` at line {}, col {}", msg, line, col);
-        println!("recieved bad token: `{:?}`", _bad_tok);
+        println!("\n --- ERROR IN PARSING ---");
+        println!("\x1b[1m\x1b[31merror:\x1b[39m {}", msg);
+        println!("\x1b[34m  --> \x1b[0m {}:{}:{}", self.file_name, line, col);
+        let start_string = format!("{} |", line);
+        for _ in 0..start_string.len() - 1 {
+            print!(" ");
+        }
+        println!("\x1b[1m\x1b[34m|");
+        println!("{}\x1b[0m{}", start_string, line_str);
+        // print arrows pointing to were the error is
+        
+        for at in 0..(col - 1 + start_string.len()) {
+            print!(
+                "{}",
+                match at {
+                    a if a == start_string.len() - 1 => "\x1b[1m\x1b[34m|\x1b[0m",
+                    _ => " ",
+                }
+            );
+        }
+        print!("\x1b[1m\x1b[31m");
+        for _ in 0..(_end_wher - start_wher) {
+            print!("^");
+        }
+        println!();
+        println!("\x1b[0m    bad token: `{:?}`", _bad_tok);
 
-        panic!();
+        std::process::exit(1);
     }
 
     /// Parse generalized tokens. Probably statements.
@@ -210,7 +251,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     let func_name = match self.eat().unwrap() {
                         (_, &Token::Identifier(func_name)) => func_name,
                         (tok_nr, &tok) => self.report_incorrect_semantics(
-                            &format!("Expected function name identifier"),
+                            "Expected function name identifier",
                             &tok,
                             tok_nr,
                         ),
@@ -219,7 +260,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartParen)) => (),
                         (tok_nr, &tok) => self.report_incorrect_semantics(
-                            &format!("Expected start parenthesis after function name"),
+                            "Expected start parenthesis after function name",
                             &tok,
                             tok_nr,
                         ),
@@ -231,7 +272,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             (_, &Token::Identifier(arg_name)) => arg_name,
                             (_, Token::Keyword(Keyword::EndParen)) => break,
                             (tok_nr, &tok) => self.report_incorrect_semantics(
-                                &format!("Expected argument name"),
+                                "Expected argument name",
                                 &tok,
                                 tok_nr,
                             ),
@@ -374,7 +415,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 ),
             };
         }
-        return statements;
+        statements
     }
 
     /// should be called when the first `(` is eaten, eats the last `)`
@@ -439,7 +480,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_inner(&mut self, prev_precedence: BinOpPrecedence) -> InnerReturn {
         let value = self.parse_leaf();
 
-        let binop = match Self::parse_oper(self.peek().unwrap().1) {
+        let binop = match self.parse_oper() {
             Some(binop) => binop,
             None => {
                 // no operator, return value
@@ -487,45 +528,28 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             }
         }
     }
-    fn parse_oper(token: &Token) -> Option<BinaryOp> {
-        match token {
-            Token::Keyword(Keyword::Plus) => {
-                return Some(BinaryOp::Add);
-            }
-            Token::Keyword(Keyword::Minus) => {
-                return Some(BinaryOp::Sub);
-            }
-            Token::Keyword(Keyword::Multiply) => {
-                return Some(BinaryOp::Multiply);
-            }
-            Token::Keyword(Keyword::Less) => {
-                return Some(BinaryOp::Less);
-            }
-            Token::Keyword(Keyword::More) => {
-                return Some(BinaryOp::More);
-            }
-            Token::Keyword(Keyword::Equals) => {
-                return Some(BinaryOp::Equals);
-            }
-            Token::Keyword(Keyword::Comma) => {
-                return Some(BinaryOp::Argument);
-            }
-            Token::Keyword(Keyword::Set(SetType::Set)) => {
-                return Some(BinaryOp::Set);
-            }
-            Token::Keyword(Keyword::Set(SetType::Add)) => {
-                return Some(BinaryOp::SetAdd);
-            }
-            Token::Keyword(Keyword::Set(SetType::Sub)) => {
-                return Some(BinaryOp::SetSub);
-            }
-            Token::Keyword(Keyword::EndParen)
-            | Token::Keyword(Keyword::EndStatement)
-            | Token::Keyword(Keyword::StartBlock) => {
-                // nothing more
-                return None;
-            }
-            bad => panic!("Bad operator token: {:?}, ", bad),
+
+    fn parse_oper(&mut self) -> Option<BinaryOp> {
+        let (res_place, &res_token) = self.peek().unwrap();
+        match res_token {
+            Token::Keyword(keyword) => match keyword {
+                Keyword::Plus => Some(BinaryOp::Add),
+                Keyword::Minus => Some(BinaryOp::Sub),
+                Keyword::Multiply => Some(BinaryOp::Multiply),
+                Keyword::Less => Some(BinaryOp::Less),
+                Keyword::More => Some(BinaryOp::More),
+                Keyword::Equals => Some(BinaryOp::Equals),
+                Keyword::EndParen
+                | Keyword::EndStatement
+                | Keyword::StartBlock
+                | Keyword::Comma => None,
+                _ => self.report_incorrect_semantics(
+                    "Token not a binary operation",
+                    &res_token,
+                    res_place,
+                ),
+            },
+            _ => None,
         }
     }
 }

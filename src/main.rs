@@ -5,24 +5,24 @@ mod parser;
 fn main() {
     println!("Hello, world!");
 
-    let file_name = 'vall: {
-        for arg in std::env::args().skip(1) {
-            println!("arg: {}", arg);
-            break 'vall arg;
-        }
-        "code.dode".to_string()
+    let file_name = {
+        let arg = std::env::args().nth(1).unwrap_or("code.dode".to_string());
+        println!("arg: {}", arg);
+        arg
     };
 
     assert!(file_name.ends_with(".dode"));
 
-    let content: &'static mut str = std::fs::read_to_string(file_name).expect("file does not exist!").leak();
+    let content: &'static mut str = std::fs::read_to_string(&file_name)
+        .expect("file does not exist!")
+        .leak();
 
     println!(" \n--- STARTING LEXING!");
     let (tokens, token_idx_to_char_nr) = lexer::generate_tokens(content);
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let ast = parser::parse(&tokens, &token_idx_to_char_nr, content);
+    let ast = parser::parse(&tokens, &token_idx_to_char_nr, content, file_name.as_str());
     println!("\n FINAL AST: {:?}", ast);
 
     println!("\n tree version: \n");
@@ -41,10 +41,7 @@ const COMMENT_PREFIX: char = '#';
 
 type IdentifierIdx = u16;
 
-
 type Int = i64;
-
-
 
 #[derive(Copy, Clone, Debug)]
 pub enum Keyword {

@@ -15,14 +15,14 @@ fn main() {
 
     assert!(file_name.ends_with(".dode"));
 
-    let content = std::fs::read_to_string(file_name).expect("file does not exist!");
+    let content: &'static mut str = std::fs::read_to_string(file_name).expect("file does not exist!").leak();
 
     println!(" \n--- STARTING LEXING!");
-    let tokens = lexer::generate_tokens(&content);
+    let (tokens, token_idx_to_char_nr) = lexer::generate_tokens(content);
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let ast = parser::parse_block(&mut tokens.iter().peekable());
+    let ast = parser::parse(&tokens, &token_idx_to_char_nr);
     println!("\n FINAL AST: {:?}", ast);
 
     println!("\n tree version: \n");
@@ -37,25 +37,14 @@ fn main() {
 }
 
 const STRING_DELIMITER: char = '"';
-const VARIABLE_PREFIX: char = '$';
-const FUNCTION_PREFIX: char = '@';
 const COMMENT_PREFIX: char = '#';
 
-type VariableNameIdx = u8;
-type FunctionNameIdx = u16;
+type IdentifierIdx = u16;
 
-type ASTBody = Vec<parser::ASTStatement>;
+
 type Int = i64;
 
-#[derive(Debug)]
-pub enum Token {
-    String(&'static str),
-    Int(Int),
-    Keyword(Keyword),
-    VariableName(VariableNameIdx),
-    FunctionName(FunctionNameIdx),
-    NewLine,
-}
+
 
 #[derive(Copy, Clone, Debug)]
 pub enum Keyword {
@@ -63,10 +52,8 @@ pub enum Keyword {
     If,
     While,
     Type(Type),
-    // for ending a block
-    End,
-    // for running an expression
-    Invoke,
+    StartBlock,
+    EndBlock,
     Set(SetType),
     Equals,
     Plus,
@@ -77,6 +64,9 @@ pub enum Keyword {
     StartParen,
     EndParen,
     Comma,
+    EndStatement,
+    TypeIncoming,
+    FunctionIncoming,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

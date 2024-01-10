@@ -7,7 +7,7 @@ fn main() {
 
     print(0 * 1);
 
-    if $my_var < 34 {
+    if my_var < 34 {
         let new_var = 23 + 34 = 57;
     }
 

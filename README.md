@@ -10,3 +10,17 @@ IF $myvar = 34 {
 }
 
 ```
+
+let a+=3 : a+3
+
+Convert AST into IR
+
+(1 + a) * b
+    |
+    v
+    1 + a
+     |
+     v
+    1
+       a
+      +

@@ -1,5 +1,5 @@
-use crate::parser::{ASTExpr, ASTStatement, BinaryOp};
-use crate::{ASTBody, VariableNameIdx, Int};
+use crate::parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp};
+use crate::{Int};
 
 #[derive(Default)]
 struct Interpreter {
@@ -24,10 +24,10 @@ pub fn run_ast(ast: &ASTBody) {
 fn run_ast_with_interp(interp: &mut Interpreter, ast: &ASTBody) {
     fn run_expr(interp: &mut Interpreter, expr: &ASTExpr) -> Int {
         match expr {
-            &ASTExpr::Whole(whole) => return whole,
+            &ASTExpr::Int(whole) => return whole,
             ASTExpr::_String(_s) => todo!(),
             ASTExpr::VarName(_) => todo!(),
-            ASTExpr::_FunctionCall(name, args) => {
+            ASTExpr::FunctionCall(name, args) => {
 
                 let o = args.as_ref().unwrap();
                 let val = run_expr(interp, &o);

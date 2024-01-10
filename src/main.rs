@@ -1,6 +1,6 @@
 mod lexer;
 mod parser;
-mod ast_interpreter;
+//mod ast_interpreter;
 
 fn main() {
     println!("Hello, world!");
@@ -22,18 +22,18 @@ fn main() {
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let ast = parser::parse(&tokens, &token_idx_to_char_nr);
+    let ast = parser::parse(&tokens, &token_idx_to_char_nr, content);
     println!("\n FINAL AST: {:?}", ast);
 
     println!("\n tree version: \n");
     parser::print_ast(&ast);
 
     println!("\n Correctness of AST pass: \n");
-    parser::check_that_ast_is_correct(&ast);
+    //parser::check_that_ast_is_correct(&ast);
 
     println!("\n Now interpreting ast: \n");
 
-    ast_interpreter::run_ast(&ast);
+    //ast_interpreter::run_ast(&ast);
 }
 
 const STRING_DELIMITER: char = '"';

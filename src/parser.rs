@@ -61,7 +61,7 @@ pub enum ASTStatement {
     },
 }
 
-pub fn check_that_ast_is_correct(body: &ASTBody) {
+/*pub fn check_that_ast_is_correct(body: &ASTBody) {
     fn type_of_expr(expr: &ASTExpr) -> Type {
         match expr {
             ASTExpr::Int(_) => {
@@ -110,13 +110,15 @@ pub fn check_that_ast_is_correct(body: &ASTBody) {
             }
         }
     }
-}
+}*/
 
-struct Parser<'ParserLifetime> {
-    tokens: std::iter::Peekable<std::iter::Enumerate<std::slice::Iter<'static, Token>>>,
-    token_idx_to_char_nr: &'ParserLifetime Vec<(usize, usize)>,
+struct Parser<'parser_lifetime> {
+    tokens: &'parser_lifetime mut std::iter::Peekable<
+        std::iter::Enumerate<std::slice::Iter<'parser_lifetime, Token>>,
+    >,
+    token_idx_to_char_nr: &'parser_lifetime Vec<(usize, usize)>,
 
-    source: &'ParserLifetime str,
+    source: &'parser_lifetime str,
 }
 
 pub fn parse(
@@ -124,7 +126,8 @@ pub fn parse(
     token_idx_to_char_nr: &Vec<(usize, usize)>,
     source: &str,
 ) -> ASTBody {
-    let mut parser = Parser::new(tokens, token_idx_to_char_nr, source);
+    let mut token_iter = tokens.iter().enumerate().peekable();
+    let mut parser = Parser::new(&mut token_iter, token_idx_to_char_nr, source);
     parser.parse_scope()
 }
 enum InnerReturn {
@@ -132,14 +135,16 @@ enum InnerReturn {
     GoBack(BinaryOp, ASTExpr),
 }
 
-impl<'ParserLifetime> Parser<'ParserLifetime> {
+impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn new(
-        tokens: &Vec<Token>,
-        token_idx_to_char_nr: &Vec<(usize, usize)>,
-        source: &'ParserLifetime str,
+        tokens: &'parser_lifetime mut std::iter::Peekable<
+            std::iter::Enumerate<std::slice::Iter<'parser_lifetime, Token>>,
+        >,
+        token_idx_to_char_nr: &'parser_lifetime Vec<(usize, usize)>,
+        source: &'parser_lifetime str,
     ) -> Self {
         Parser {
-            tokens: tokens.iter().enumerate().peekable(),
+            tokens,
             token_idx_to_char_nr: token_idx_to_char_nr,
             source,
         }
@@ -153,13 +158,12 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
     }
 
     fn report_incorrect_semantics(
+        // TODO, better error reporting
         &mut self,
         msg: &str,
-        bad_tok: &Token,
+        _bad_tok: &Token,
         token_start_pos: usize,
     ) -> ! {
-        println!("Parse error: `{}`", msg);
-
         let (start_wher, end_wher) = self.token_idx_to_char_nr[token_start_pos];
 
         let mut line = 1;
@@ -175,7 +179,11 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                 col += 1;
             }
         }
-        panic!("{} at line {}, col {}", msg, line, col);
+
+        println!("Parse error: `{}` at line {}, col {}", msg, line, col);
+        println!("recieved bad token: `{:?}`", _bad_tok);
+
+        panic!();
     }
 
     /// Parse generalized tokens. Probably statements.
@@ -201,18 +209,18 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                     // Next token should be function name identifier
                     let func_name = match self.eat().unwrap() {
                         (_, &Token::Identifier(func_name)) => func_name,
-                        (tok_nr, tok) => self.report_incorrect_semantics(
+                        (tok_nr, &tok) => self.report_incorrect_semantics(
                             &format!("Expected function name identifier"),
-                            tok,
+                            &tok,
                             tok_nr,
                         ),
                     };
                     // Next token should be start paren
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartParen)) => (),
-                        (tok_nr, tok) => self.report_incorrect_semantics(
+                        (tok_nr, &tok) => self.report_incorrect_semantics(
                             &format!("Expected start parenthesis after function name"),
-                            tok,
+                            &tok,
                             tok_nr,
                         ),
                     };
@@ -222,34 +230,34 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                         let arg_name = match self.eat().unwrap() {
                             (_, &Token::Identifier(arg_name)) => arg_name,
                             (_, Token::Keyword(Keyword::EndParen)) => break,
-                            (tok_nr, tok) => self.report_incorrect_semantics(
+                            (tok_nr, &tok) => self.report_incorrect_semantics(
                                 &format!("Expected argument name"),
-                                tok,
+                                &tok,
                                 tok_nr,
                             ),
                         };
                         // Next should be a colon
                         match self.eat().unwrap() {
                             (_, Token::Keyword(Keyword::TypeIncoming)) => (),
-                            (n, t) => self.report_incorrect_semantics(
+                            (n, &t) => self.report_incorrect_semantics(
                                 "Expected colon after argument name",
-                                t,
+                                &t,
                                 n,
                             ),
                         };
                         // Type name
                         let type_name = match self.eat().unwrap() {
                             (_, &Token::Identifier(t)) => t,
-                            (n, t) => self.report_incorrect_semantics("Expected type name", t, n),
+                            (n, &t) => self.report_incorrect_semantics("Expected type name", &t, n),
                         };
                         arg_vec.push((arg_name, type_name));
                         // Next should be a comma or end paren
                         match self.eat().unwrap() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
                             (_, Token::Keyword(Keyword::EndParen)) => break,
-                            (n, t) => self.report_incorrect_semantics(
+                            (n, &t) => self.report_incorrect_semantics(
                                 "Expected comma or end parenthesis after argument",
-                                t,
+                                &t,
                                 n,
                             ),
                         };
@@ -257,9 +265,9 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                     // must be { after this
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, t) => self.report_incorrect_semantics(
+                        (n, &t) => self.report_incorrect_semantics(
                             "Expected `{` after function declaration",
-                            t,
+                            &t,
                             n,
                         ),
                     };
@@ -269,20 +277,29 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                         body: self.parse_scope(),
                     });
                 }
-
+                // create variable with `let`
                 (_, &Token::Keyword(Keyword::CreateVar)) => {
                     // Next token should be variable-name
                     let var_idx = match self.eat().unwrap() {
                         (_, &Token::Identifier(var_idx)) => var_idx,
-                        (n, t) => self.report_incorrect_semantics("expected variable name", t, n),
+                        (n, &t) => self.report_incorrect_semantics("expected variable name", &t, n),
                     };
                     // make sure there is a SET token after var name
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::Set(SetType::Set))) => (),
-                        (n, t) => self.report_incorrect_semantics("expected set token", t, n),
+                        (n, &t) => self.report_incorrect_semantics("expected set token", &t, n),
                     }
                     // now there should be an expression
                     let expr = ASTBox::new(self.parse_expr());
+                    // it should end with a semicolon
+                    match self.eat().unwrap() {
+                        (_, Token::Keyword(Keyword::EndStatement)) => (),
+                        (n, &t) => self.report_incorrect_semantics(
+                            "expected `;` after variable declaration",
+                            &t,
+                            n,
+                        ),
+                    };
                     push_to_statements(ASTStatement::EvalExpr(ASTExpr::Binary(
                         BinaryOp::Set,
                         ASTBox::new(ASTExpr::VarName(var_idx)),
@@ -294,9 +311,11 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                     let cond = self.parse_expr();
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, t) => {
-                            self.report_incorrect_semantics("Expected `{` after if condition", t, n)
-                        }
+                        (n, &t) => self.report_incorrect_semantics(
+                            "Expected `{` after if condition",
+                            &t,
+                            n,
+                        ),
                     };
                     let body = self.parse_scope();
                     push_to_statements(ASTStatement::If {
@@ -309,9 +328,9 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                     let cond = self.parse_expr();
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, t) => self.report_incorrect_semantics(
+                        (n, &t) => self.report_incorrect_semantics(
                             "Expected `{` after while condition",
-                            t,
+                            &t,
                             n,
                         ),
                     };
@@ -324,30 +343,79 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                 (_, Token::Keyword(Keyword::EndBlock)) => {
                     return statements;
                 }
+                // Function call
+                (_, &Token::Identifier(e)) => {
+                    // make sure there is a start paren after function name
+                    match self.eat().unwrap() {
+                        (_, Token::Keyword(Keyword::StartParen)) => (),
+                        (n, &t) => self.report_incorrect_semantics(
+                            "expected start paren after identifier in statement",
+                            &t,
+                            n,
+                        ),
+                    };
+                    let func_args = self.parse_function_call();
+                    // make sure it ends with a semicolon
+                    match self.eat().unwrap() {
+                        (_, Token::Keyword(Keyword::EndStatement)) => (),
+                        (n, &t) => self.report_incorrect_semantics(
+                            "expected end statement after function call",
+                            &t,
+                            n,
+                        ),
+                    };
+                    push_to_statements(ASTStatement::EvalExpr(ASTExpr::FunctionCall(e, func_args)));
+                }
 
-                (n, t) => self.report_incorrect_semantics(
+                (n, &t) => self.report_incorrect_semantics(
                     "Erroneous token to start expression with",
-                    t,
+                    &t,
                     n,
                 ),
             };
         }
         return statements;
     }
+
+    /// should be called when the first `(` is eaten, eats the last `)`
+    fn parse_function_call(&mut self) -> Vec<ASTExpr> {
+        let mut arg_vec = Vec::new();
+        while match self.peek().unwrap() {
+            (_, Token::Keyword(Keyword::EndParen)) => false,
+            (_, Token::Keyword(Keyword::Comma)) => {
+                self.eat();
+                true
+            }
+            _ => true,
+            //  (n, &t) => self.report_incorrect_semantics("expected comma", &t, n),
+        } {
+            // eat all arguments
+            let arg = self.parse_expr();
+            arg_vec.push(arg);
+        }
+        self.eat(); // eat end paren
+        arg_vec
+    }
+
+    // doesn't eat end of expression
     fn parse_expr(&mut self) -> ASTExpr {
         match self.parse_inner(0) {
-            InnerReturn::ASTThing(expr) => return expr,
+            InnerReturn::ASTThing(expr) => expr,
             InnerReturn::GoBack(_, _) => panic!("Can't go back in highest level???"),
         }
     }
 
     fn parse_leaf(&mut self) -> ASTExpr {
         match self.eat().unwrap() {
+            (_, Token::String(_)) => panic!("no strings please!"),
             (_, &Token::Int(v)) => ASTExpr::Int(v),
             (_, Token::Keyword(Keyword::StartParen)) => {
                 // create new parse scope here
                 match self.parse_inner(0) {
-                    InnerReturn::ASTThing(e) => e,
+                    InnerReturn::ASTThing(e) => {
+                        self.eat();
+                        e
+                    } // eat the end parenthesis
                     _ => panic!("can't go back in parenthesis highest level???"),
                 }
             }
@@ -357,25 +425,13 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
                     (_, Token::Keyword(Keyword::StartParen)) => {
                         // function call
                         self.eat(); // eat start paren
-                        let mut arg_vec = Vec::new();
-                        while match self.peek().unwrap() {
-                            (_, Token::Keyword(Keyword::EndParen)) => false,
-                            (_, Token::Keyword(Keyword::Comma)) => true,
-                            (n, t) => self.report_incorrect_semantics("expected comma", t, n),
-                        } {
-                            self.eat();
-                            // eat all arguments
-                            let arg = self.parse_expr();
-                            arg_vec.push(arg);
-                        }
-                        self.eat(); // eat end paren
-                        ASTExpr::FunctionCall(e, arg_vec)
+                        ASTExpr::FunctionCall(e, self.parse_function_call())
                     }
                     _ => ASTExpr::VarName(e),
                 }
             }
-            (n, t @ Token::Keyword(_)) => {
-                self.report_incorrect_semantics("no keywords as leaf in expr", t, n)
+            (n, &t @ Token::Keyword(_)) => {
+                self.report_incorrect_semantics("no keywords as leaf in expr", &t, n)
             }
         }
     }
@@ -383,13 +439,14 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
     fn parse_inner(&mut self, prev_precedence: BinOpPrecedence) -> InnerReturn {
         let value = self.parse_leaf();
 
-        let binop = match self.parse_oper(self.eat().unwrap().1) {
+        let binop = match Self::parse_oper(self.peek().unwrap().1) {
             Some(binop) => binop,
             None => {
                 // no operator, return value
                 return InnerReturn::ASTThing(value);
             }
         };
+        self.eat(); // eat operator
         let precedence = binop.precedence();
         if precedence < prev_precedence {
             // we have to back and collect things in this "precedence block"
@@ -430,7 +487,7 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
             }
         }
     }
-    fn parse_oper(&mut self, token: &Token) -> Option<BinaryOp> {
+    fn parse_oper(token: &Token) -> Option<BinaryOp> {
         match token {
             Token::Keyword(Keyword::Plus) => {
                 return Some(BinaryOp::Add);
@@ -462,7 +519,9 @@ impl<'ParserLifetime> Parser<'ParserLifetime> {
             Token::Keyword(Keyword::Set(SetType::Sub)) => {
                 return Some(BinaryOp::SetSub);
             }
-            Token::Keyword(Keyword::EndParen) => {
+            Token::Keyword(Keyword::EndParen)
+            | Token::Keyword(Keyword::EndStatement)
+            | Token::Keyword(Keyword::StartBlock) => {
                 // nothing more
                 return None;
             }
@@ -492,9 +551,7 @@ pub fn print_ast(body: &ASTBody) {
             }
             ASTExpr::FunctionCall(name, args) => {
                 println!("func: {}", name);
-                if let Some(args) = args {
-                    print_expr(args, indent + 1);
-                }
+                println!("args: {:?}", args);
             }
             ASTExpr::Binary(op, f, s) => {
                 println!("op: {:?}", op);
@@ -528,6 +585,13 @@ pub fn print_ast(body: &ASTBody) {
                 ASTStatement::EvalExpr(expr) => {
                     println!("Eval following:");
                     print_expr(expr, indent + 1);
+                }
+                ASTStatement::Function { name, args, body } => {
+                    println!("Function: {}", name);
+                    println!("Args: {:?}", args);
+                    print_indent(indent);
+                    println!("Body:");
+                    print_body(body, indent + 1);
                 }
             }
         }

@@ -103,7 +103,7 @@ impl Lexer {
         }
     }
 
-    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, end_wher: usize) {
+    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, _end_wher: usize) { // TODO print better error message
         let mut line = 1;
         let mut col = 1;
         for (idx, ch) in self.source.chars().enumerate() {

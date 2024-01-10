@@ -1,5 +1,5 @@
 use crate::parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp};
-use crate::{Int};
+use crate::Int;
 
 #[derive(Default)]
 struct Interpreter {

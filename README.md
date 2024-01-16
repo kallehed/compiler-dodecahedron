@@ -1,5 +1,7 @@
 # compiler-dodecahedron
 Dodecahedron programming language compiler
+
+OLD syntax
 ```
 
 FORM $myvar === 343 + 34 

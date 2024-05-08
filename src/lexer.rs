@@ -282,8 +282,12 @@ impl Lexer {
 }
 
 /// lexer
-pub fn generate_tokens(content: &'static str) -> (Vec<Token>, Vec<(usize, usize)>) {
+pub fn generate_tokens(content: &'static str) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
     let mut lexer = Lexer::new(content);
     lexer.lex();
-    (lexer.tokens, lexer.token_idx_to_char_nr)
+    let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
+    for (string, ident) in lexer.identifier_to_int {
+        identifier_idx_to_string[ident as usize] = string;
+    }
+    (lexer.tokens, lexer.token_idx_to_char_nr, identifier_idx_to_string)
 }

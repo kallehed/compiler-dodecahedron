@@ -1,11 +1,8 @@
-use std::collections::HashMap;
-
 use crate::lexer::Token;
 use crate::IdentifierIdx;
 use crate::Int;
 use crate::Keyword;
 use crate::SetType;
-use crate::Type;
 
 type ASTBox<T> = Box<T>;
 pub type ASTBody = Vec<ASTStatement>;
@@ -53,9 +50,10 @@ pub enum ASTStatement {
         body: ASTBody,
     },
     EvalExpr(ASTExpr), // for just evaulating an expression like a function call
+    CreateVar(IdentifierIdx),
     Function {
         name: IdentifierIdx,
-        args: Vec<(IdentifierIdx, IdentifierIdx)>, // name, type
+        args: Vec<IdentifierIdx>, // name
         body: ASTBody,
     },
 }
@@ -277,21 +275,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                                 tok_nr,
                             ),
                         };
-                        // Next should be a colon
-                        match self.eat().unwrap() {
-                            (_, Token::Keyword(Keyword::TypeIncoming)) => (),
-                            (n, &t) => self.report_incorrect_semantics(
-                                "Expected colon after argument name",
-                                &t,
-                                n,
-                            ),
-                        };
-                        // Type name
-                        let type_name = match self.eat().unwrap() {
-                            (_, &Token::Identifier(t)) => t,
-                            (n, &t) => self.report_incorrect_semantics("Expected type name", &t, n),
-                        };
-                        arg_vec.push((arg_name, type_name));
+                        arg_vec.push(arg_name);
                         // Next should be a comma or end paren
                         match self.eat().unwrap() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
@@ -341,6 +325,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             n,
                         ),
                     };
+                    push_to_statements(ASTStatement::CreateVar(var_idx)); // create variable
                     push_to_statements(ASTStatement::EvalExpr(ASTExpr::Binary(
                         BinaryOp::Set,
                         ASTBox::new(ASTExpr::VarName(var_idx)),
@@ -390,7 +375,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     match self.eat().unwrap() {
                         (_, Token::Keyword(Keyword::StartParen)) => (),
                         (n, &t) => self.report_incorrect_semantics(
-                            "expected start paren after identifier in statement",
+                            "expected start parenthesis after identifier in statement",
                             &t,
                             n,
                         ),
@@ -448,7 +433,9 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
 
     fn parse_leaf(&mut self) -> ASTExpr {
         match self.eat().unwrap() {
-            (_, Token::String(_)) => panic!("no strings please!"),
+            (_, Token::String(string)) => {
+                ASTExpr::_String(string)
+            },
             (_, &Token::Int(v)) => ASTExpr::Int(v),
             (_, Token::Keyword(Keyword::StartParen)) => {
                 // create new parse scope here
@@ -617,6 +604,9 @@ pub fn print_ast(body: &ASTBody) {
                     println!("Body:");
                     print_body(body, indent + 1);
                 }
+                ASTStatement::CreateVar(var_name) => {
+                    println!("Create variable: {}", var_name);
+                },
             }
         }
     }

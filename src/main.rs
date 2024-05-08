@@ -1,5 +1,6 @@
 mod lexer;
 mod parser;
+mod c_backend;
 //mod ast_interpreter;
 
 fn main() {
@@ -18,22 +19,25 @@ fn main() {
         .leak();
 
     println!(" \n--- STARTING LEXING!");
-    let (tokens, token_idx_to_char_nr) = lexer::generate_tokens(content);
+    let (tokens, token_idx_to_char_nr, ident_idx_to_string) = lexer::generate_tokens(content);
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
     let ast = parser::parse(&tokens, &token_idx_to_char_nr, content, file_name.as_str());
     println!("\n FINAL AST: {:?}", ast);
 
-    println!("\n tree version: \n");
+    println!("\n--- tree version: \n");
     parser::print_ast(&ast);
 
-    println!("\n Correctness of AST pass: \n");
+    println!("\n--- Correctness of AST pass: \n");
     //parser::check_that_ast_is_correct(&ast);
 
-    println!("\n Now interpreting ast: \n");
-
     //ast_interpreter::run_ast(&ast);
+    let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
+
+    println!("\n--- Now printing C code: \n");
+    println!("{}", c_code);
+
 }
 
 const STRING_DELIMITER: char = '"';

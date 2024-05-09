@@ -1,4 +1,7 @@
-use crate::{parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp}, IdentifierIdx};
+use crate::{
+    parser::{ASTBody, ASTExpr, InASTExpr, ASTStatement, BinaryOp},
+    IdentifierIdx,
+};
 
 const DEFAULT_TYPE: &str = "long ";
 
@@ -21,12 +24,10 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
         fn function_to_c_name(&self, func: &IdentifierIdx) -> String {
             let real_name = self.ident_to_string[*func as usize];
-            if real_name == "printf" {
-                "printf".to_string()
-            }
-            else if real_name == "main" {"main".to_string()}
-            else {
-                format!("func{}", func) 
+            match real_name {
+                "printf" => "printf".to_string(),
+                "main" => "main".to_string(),
+                _ => format!("func{}", func)
             }
         }
 
@@ -48,16 +49,22 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             }
         }
 
-        fn function_to_c_start_of_function(&self, name: &IdentifierIdx, args: &[IdentifierIdx]) -> String {
+        fn function_to_c_start_of_function(
+            &self,
+            name: &IdentifierIdx,
+            args: &[IdentifierIdx],
+        ) -> String {
             let mut out = String::new();
-    
+
             out.push_str(DEFAULT_TYPE);
             out.push_str(&self.function_to_c_name(name));
             out.push('(');
             for (idx, arg) in args.iter().enumerate() {
                 out.push_str(DEFAULT_TYPE);
                 out.push_str(&self.var_to_c_name(arg));
-                if idx == args.len() - 1 {break;}
+                if idx == args.len() - 1 {
+                    break;
+                }
                 out.push(',');
             }
             out.push(')');
@@ -73,7 +80,6 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.print("){");
                         self.body_to_c(body);
                         self.print("}");
-        
                     }
                     ASTStatement::While { condition, body } => {
                         self.print("while (");
@@ -87,16 +93,14 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.print(";");
                     }
                     ASTStatement::Function { name, args, body } => {
-    
                         let first_part = self.function_to_c_start_of_function(name, args);
                         self.print(&first_part);
                         self.declare(&first_part);
                         self.declare(";");
-                        
+
                         self.print("{");
                         self.body_to_c(body);
                         self.print("}");
-    
                     }
                     ASTStatement::CreateVar(var_name) => {
                         self.print(DEFAULT_TYPE);
@@ -108,48 +112,54 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
         }
 
         fn expr_to_c(&mut self, expr: &ASTExpr) {
-            match expr {
-                ASTExpr::Int(int) => {
+            match &expr.0 {
+                InASTExpr::Int(int) => {
                     self.print(&int.to_string());
                 }
-                ASTExpr::_String(string) => {
+                InASTExpr::String(string) => {
                     self.print("\"");
                     self.print(string);
                     self.print("\"");
-                },
-                ASTExpr::VarName(var_name) => {
+                }
+                InASTExpr::VarName(var_name) => {
                     self.print(&self.var_to_c_name(var_name));
-                },
-                ASTExpr::FunctionCall(name, args) => {
+                }
+                InASTExpr::FunctionCall(name, args) => {
                     self.print(&self.function_to_c_name(name));
                     self.print("(");
                     for (idx, arg) in args.iter().enumerate() {
                         self.expr_to_c(arg);
-                        if idx == args.len() - 1 {break;}
+                        if idx == args.len() - 1 {
+                            break;
+                        }
                         self.print(",");
                     }
                     self.print(")");
-                },
-                ASTExpr::Binary(op, left, right) => {
+                }
+                InASTExpr::Binary(op, left, right) => { // same for L-value binarys and normal exprs
                     self.print("((");
-    
+
                     self.expr_to_c(left);
-    
+
                     self.print(")");
-    
+
                     self.print(self.binary_op_to_c_name(op));
-                    
+
                     self.print("(");
-    
+
                     self.expr_to_c(right);
-    
+
                     self.print("))");
-                },
+                }
             }
         }
     }
 
-    let mut out = Output { code: String::new(), declarations: "#include <stdio.h>\n".to_string(), ident_to_string};
+    let mut out = Output {
+        code: String::new(),
+        declarations: "#include <stdio.h>\n".to_string(),
+        ident_to_string,
+    };
 
     out.body_to_c(body);
     out.declarations.push_str(&out.code);

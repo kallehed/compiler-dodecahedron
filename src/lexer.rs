@@ -27,7 +27,7 @@ struct Lexer {
     source: &'static str,
     tokens: Vec<Token>,
     identifier_to_int: HashMap<&'static str, IdentifierIdx>,
-    token_idx_to_char_nr: Vec<(usize, usize)>,
+    token_idx_to_char_range: Vec<(usize, usize)>,
 
     // constant members
     str_to_keyword: HashMap<&'static str, Keyword>,
@@ -94,7 +94,7 @@ impl Lexer {
             source: content,
             tokens: Vec::new(),
             identifier_to_int: HashMap::new(),
-            token_idx_to_char_nr: Vec::new(),
+            token_idx_to_char_range: Vec::new(),
 
             str_to_keyword,
             mathy_keywords,
@@ -103,7 +103,8 @@ impl Lexer {
         }
     }
 
-    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, _end_wher: usize) { // TODO print better error message
+    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, _end_wher: usize) {
+        // TODO print better error message
         let mut line = 1;
         let mut col = 1;
         for (idx, ch) in self.source.chars().enumerate() {
@@ -131,7 +132,8 @@ impl Lexer {
     fn add_token(&mut self, token: Token, start_char_idx: usize, end_char_idx: usize) {
         println!("add token: {:?}", token);
         self.tokens.push(token);
-        self.token_idx_to_char_nr.push((start_char_idx, end_char_idx));
+        self.token_idx_to_char_range
+            .push((start_char_idx, end_char_idx));
     }
 
     fn add_identifier(&mut self, name: &'static str, start_char_idx: usize, end_char_idx: usize) {
@@ -217,9 +219,11 @@ impl Lexer {
                 ch if self.single_char_repeatables.contains_key(&ch) => {
                     // special characters that can be repeated without whitespace
                     let (idx, _) = self.eat().unwrap();
-                    self.add_token(Token::Keyword(
-                        *self.single_char_repeatables.get(&ch).unwrap(),
-                    ), idx, idx + 1);
+                    self.add_token(
+                        Token::Keyword(*self.single_char_repeatables.get(&ch).unwrap()),
+                        idx,
+                        idx + 1,
+                    );
                 }
                 // special math operators that can have names after them
                 ch if self.math_chars.contains(&ch) => {
@@ -260,7 +264,9 @@ impl Lexer {
                     // check if it is a keyword
                     let name_str = &self.source[start_idx..end_idx];
                     match self.str_to_keyword.get(name_str) {
-                        Some(&keyword) => self.add_token(Token::Keyword(keyword), start_idx, end_idx),
+                        Some(&keyword) => {
+                            self.add_token(Token::Keyword(keyword), start_idx, end_idx)
+                        }
                         None => {
                             // not a keyword, must be a identifier (variable or function name)
                             self.add_identifier(name_str, start_idx, end_idx);
@@ -274,20 +280,23 @@ impl Lexer {
             }
         }
 
-        println!(
-            "idents: {:?}",
-            self.identifier_to_int
-        );
+        println!("idents: {:?}", self.identifier_to_int);
     }
 }
 
 /// lexer
-pub fn generate_tokens(content: &'static str) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
+pub fn generate_tokens(
+    content: &'static str,
+) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
     let mut lexer = Lexer::new(content);
     lexer.lex();
     let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
     for (string, ident) in lexer.identifier_to_int {
         identifier_idx_to_string[ident as usize] = string;
     }
-    (lexer.tokens, lexer.token_idx_to_char_nr, identifier_idx_to_string)
+    (
+        lexer.tokens,
+        lexer.token_idx_to_char_range,
+        identifier_idx_to_string,
+    )
 }

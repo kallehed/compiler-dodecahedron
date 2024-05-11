@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use crate::lexer::Token;
-use crate::IdentifierIdx;
+use crate::IdentIdx;
 use crate::Int;
 use crate::Keyword;
 use crate::SetType;
@@ -7,6 +9,7 @@ use crate::SetType;
 type ASTBox<T> = Box<T>;
 pub type ASTBody = Vec<ASTStatement>;
 
+/// Binary operators with precedence as integer representation
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum BinaryOp {
     // numbers specify their precedence. Higher means it should be evaluated first
@@ -32,14 +35,13 @@ impl BinaryOp {
 
 /// holds InAstExpr and token idx of expr
 #[derive(Debug)]
-pub struct ASTExpr (pub InASTExpr, pub usize);
+pub struct ASTExpr(pub InASTExpr, pub usize);
 
 #[derive(Debug)]
 pub enum InASTExpr {
     Int(Int),
-    String(&'static str),
-    VarName(IdentifierIdx),
-    FunctionCall(IdentifierIdx, Vec<ASTExpr>), // a function and its arguments
+    VarName(IdentIdx),
+    FunctionCall(IdentIdx, Vec<ASTExpr>), // a function and its arguments
     Binary(BinaryOp, ASTBox<ASTExpr>, ASTBox<ASTExpr>),
 }
 
@@ -53,11 +55,11 @@ pub enum ASTStatement {
         condition: ASTBox<ASTExpr>,
         body: ASTBody,
     },
-    EvalExpr(ASTExpr), // for just evaulating an expression like a function call
-    CreateVar(IdentifierIdx),
+    EvalExpr(ASTExpr), // evaluating an expression: 1+f(2)
+    CreateVar(IdentIdx),
     Function {
-        name: IdentifierIdx,
-        args: Vec<IdentifierIdx>, // name
+        name: IdentIdx,
+        args: Vec<IdentIdx>, // names of args
         body: ASTBody,
     },
 }
@@ -66,21 +68,36 @@ struct Parser<'parser_lifetime> {
     tokens: &'parser_lifetime mut std::iter::Peekable<
         std::iter::Enumerate<std::slice::Iter<'parser_lifetime, Token>>,
     >,
-    token_idx_to_char_range: &'parser_lifetime Vec<(usize, usize)>,
 
+    // name and nr of args
+    functions: HashMap<IdentIdx, u16>,
+
+    // immutable:
+    token_idx_to_char_range: &'parser_lifetime Vec<(usize, usize)>,
     source: &'parser_lifetime str,
     file_name: &'parser_lifetime str,
 }
 
+/// returns Abstract Syntax Tree with Function hashmap which contains all functions declarations
 pub fn parse(
     tokens: &[Token],
     token_idx_to_char_range: &Vec<(usize, usize)>,
     source: &str,
     file_name: &str,
-) -> ASTBody {
+) -> (ASTBody, HashMap<IdentIdx, u16>) {
     let mut token_iter = tokens.iter().enumerate().peekable();
-    let mut parser = Parser::new(&mut token_iter, token_idx_to_char_range, source, file_name);
-    parser.parse_scope()
+    let mut parser = Parser {
+        tokens: &mut token_iter,
+        functions: HashMap::new(),
+
+        token_idx_to_char_range,
+        source,
+        file_name,
+    };
+
+    let ast = parser.parse_scope();
+
+    (ast, parser.functions)
 }
 enum InnerReturn {
     ASTThing(ASTExpr),
@@ -89,21 +106,6 @@ enum InnerReturn {
 }
 
 impl<'parser_lifetime> Parser<'parser_lifetime> {
-    fn new(
-        tokens: &'parser_lifetime mut std::iter::Peekable<
-            std::iter::Enumerate<std::slice::Iter<'parser_lifetime, Token>>,
-        >,
-        token_idx_to_char_range: &'parser_lifetime Vec<(usize, usize)>,
-        source: &'parser_lifetime str,
-        file_name: &'parser_lifetime str,
-    ) -> Self {
-        Parser {
-            tokens,
-            token_idx_to_char_range,
-            source,
-            file_name,
-        }
-    }
     fn eat(&mut self) -> Option<(usize, &Token)> {
         self.tokens.next()
     }
@@ -113,68 +115,22 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     }
 
     fn report_incorrect_semantics(
-        // TODO, better error reporting
         &mut self,
         msg: &str,
-        _bad_tok: &Token,
-        token_start_pos: usize,
+        bad_tok: Option<&Token>,
+        token_start_idx: usize,
     ) -> ! {
-        let (start_wher, _end_wher) = self.token_idx_to_char_range[token_start_pos];
-
-        let mut line = 1;
-        let mut col = 1;
-        let mut latest_start_of_newline = 0;
-        for (idx, ch) in self.source.chars().enumerate() {
-            if idx == start_wher {
-                break;
-            }
-            if ch == '\n' {
-                line += 1;
-                col = 1;
-                latest_start_of_newline = idx + 1;
-            } else {
-                col += 1;
-            }
+        crate::mark_error_in_source(
+            self.source,
+            self.file_name,
+            msg,
+            self.token_idx_to_char_range[token_start_idx],
+        );
+        if let Some(bad_tok) = bad_tok {
+            println!("\x1b[0m    bad token: `{:?}`", bad_tok);
+        } else {
+            println!("\x1b[0m    bad token could not be pinpointed unfortunately.");
         }
-        // get string for line by iterating over chars again
-        let line_str = {
-            let mut end_of_line = 0;
-            for (idx, ch) in self.source.chars().enumerate() {
-                if idx > latest_start_of_newline && ch == '\n' {
-                    // found end of line
-                    end_of_line = idx;
-                    break;
-                }
-            }
-            &self.source[latest_start_of_newline..end_of_line]
-        };
-
-        println!("\n --- ERROR IN PARSING ---");
-        println!("\x1b[1m\x1b[31merror:\x1b[39m {}", msg);
-        println!("\x1b[34m  --> \x1b[0m {}:{}:{}", self.file_name, line, col);
-        let start_string = format!("{} |", line);
-        for _ in 0..start_string.len() - 1 {
-            print!(" ");
-        }
-        println!("\x1b[1m\x1b[34m|");
-        println!("{}\x1b[0m{}", start_string, line_str);
-        // print arrows pointing to were the error is
-
-        for at in 0..(col - 1 + start_string.len()) {
-            print!(
-                "{}",
-                match at {
-                    a if a == start_string.len() - 1 => "\x1b[1m\x1b[34m|\x1b[0m",
-                    _ => " ",
-                }
-            );
-        }
-        print!("\x1b[1m\x1b[31m");
-        for _ in 0..(_end_wher - start_wher) {
-            print!("^");
-        }
-        println!();
-        println!("\x1b[0m    bad token: `{:?}`", _bad_tok);
 
         std::process::exit(1);
     }
@@ -201,11 +157,11 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 (_, Token::Keyword(Keyword::FunctionIncoming)) => {
                     self.eat();
                     // Next token should be function name identifier
-                    let func_name = match self.eat().unwrap() {
-                        (_, &Token::Identifier(func_name)) => func_name,
+                    let (func_name_token_position, func_name) = match self.eat().unwrap() {
+                        (p, &Token::Identifier(func_name)) => (p, func_name),
                         (tok_nr, &tok) => self.report_incorrect_semantics(
                             "Expected function name identifier",
-                            &tok,
+                            Some(&tok),
                             tok_nr,
                         ),
                     };
@@ -214,7 +170,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         (_, Token::Keyword(Keyword::StartParen)) => (),
                         (tok_nr, &tok) => self.report_incorrect_semantics(
                             "Expected start parenthesis after function name",
-                            &tok,
+                            Some(&tok),
                             tok_nr,
                         ),
                     };
@@ -226,7 +182,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             (_, Token::Keyword(Keyword::EndParen)) => break,
                             (tok_nr, &tok) => self.report_incorrect_semantics(
                                 "Expected argument name",
-                                &tok,
+                                Some(&tok),
                                 tok_nr,
                             ),
                         };
@@ -237,7 +193,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             (_, Token::Keyword(Keyword::EndParen)) => break,
                             (n, &t) => self.report_incorrect_semantics(
                                 "Expected comma or end parenthesis after argument",
-                                &t,
+                                Some(&t),
                                 n,
                             ),
                         };
@@ -247,10 +203,23 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
                         (n, &t) => self.report_incorrect_semantics(
                             "Expected `{` after function declaration",
-                            &t,
+                            Some(&t),
                             n,
                         ),
                     };
+
+                    {
+                        // add function to function hashmap
+                        if self.functions.contains_key(&func_name) {
+                            // functions already exists, error!
+                            self.report_incorrect_semantics(
+                                "Function with same name already declared!",
+                                None,
+                                func_name_token_position,
+                            )
+                        }
+                        self.functions.insert(func_name, arg_vec.len() as _);
+                    }
                     push_to_statements(ASTStatement::Function {
                         name: func_name,
                         args: arg_vec,
@@ -263,12 +232,16 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     // Next token should be variable-name
                     let (var_idx, var_token_place) = match self.eat().unwrap() {
                         (p, &Token::Identifier(var_idx)) => (var_idx, p),
-                        (n, &t) => self.report_incorrect_semantics("expected variable name", &t, n),
+                        (n, &t) => {
+                            self.report_incorrect_semantics("expected variable name", Some(&t), n)
+                        }
                     };
                     // make sure there is a SET token after var name
                     let set_token_place = match self.eat().unwrap() {
                         (p, Token::Keyword(Keyword::Set(SetType::Set))) => p,
-                        (n, &t) => self.report_incorrect_semantics("expected set token", &t, n),
+                        (n, &t) => {
+                            self.report_incorrect_semantics("expected set token", Some(&t), n)
+                        }
                     };
                     // now there should be an expression
                     let expr = ASTBox::new(self.parse_expr());
@@ -277,16 +250,19 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         (_, Token::Keyword(Keyword::EndStatement)) => (),
                         (n, &t) => self.report_incorrect_semantics(
                             "expected `;` after variable declaration",
-                            &t,
+                            Some(&t),
                             n,
                         ),
                     };
                     push_to_statements(ASTStatement::CreateVar(var_idx)); // create variable
-                    push_to_statements(ASTStatement::EvalExpr(ASTExpr(InASTExpr::Binary(
-                        BinaryOp::Set,
-                        ASTBox::new(ASTExpr(InASTExpr::VarName(var_idx), var_token_place)),
-                        expr,
-                    ), set_token_place)));
+                    push_to_statements(ASTStatement::EvalExpr(ASTExpr(
+                        InASTExpr::Binary(
+                            BinaryOp::Set,
+                            ASTBox::new(ASTExpr(InASTExpr::VarName(var_idx), var_token_place)),
+                            expr,
+                        ),
+                        set_token_place,
+                    )));
                 }
                 // If statement
                 (_, Token::Keyword(Keyword::If)) => {
@@ -296,7 +272,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
                         (n, &t) => self.report_incorrect_semantics(
                             "Expected `{` after if condition",
-                            &t,
+                            Some(&t),
                             n,
                         ),
                     };
@@ -314,7 +290,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         (_, Token::Keyword(Keyword::StartBlock)) => (),
                         (n, &t) => self.report_incorrect_semantics(
                             "Expected `{` after while condition",
-                            &t,
+                            Some(&t),
                             n,
                         ),
                     };
@@ -329,8 +305,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     return statements;
                 }
                 // Function call, or just expression
-                (_, &Token::Identifier(e)) => {
-                    // make sure there is a start paren after function name
+                (_, &Token::Identifier(_)) => {
+                    // parse the expression. e.g. f(x) + 42
                     let stat = ASTStatement::EvalExpr(self.parse_expr());
                     // should be semicolon after expression:
                     match self.peek().unwrap() {
@@ -338,40 +314,15 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             self.eat();
                         }
                         (start, &t) => {
-                            self.report_incorrect_semantics("must end statement!", &t, start)
+                            self.report_incorrect_semantics("must end statement!", Some(&t), start)
                         }
                     }
                     push_to_statements(stat);
-
-                    /* 
-                    match self.eat().unwrap() {
-                        // function call
-                        (_, Token::Keyword(Keyword::StartParen)) => {  
-                            let func_args = self.parse_function_call();
-                            // make sure it ends with a semicolon
-                            match self.eat().unwrap() {
-                                (_, Token::Keyword(Keyword::EndStatement)) => (),
-                                (n, &t) => self.report_incorrect_semantics(
-                                    "expected end statement after function call",
-                                    &t,
-                                    n,
-                                ),
-                            };
-                            push_to_statements(ASTStatement::EvalExpr(ASTExpr::FunctionCall(e, func_args)));
-                        },
-
-                        (n, &t) => self.report_incorrect_semantics(
-                            "expected start parenthesis after identifier in statement",
-                            &t,
-                            n,
-                        ),
-                    };
-                    */
                 }
 
                 (n, &t) => self.report_incorrect_semantics(
                     "Erroneous token to start statement with",
-                    &t,
+                    Some(&t),
                     n,
                 ),
             };
@@ -379,7 +330,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         statements
     }
 
-    /// should be called when the first `(` is eaten, eats the last `)`
+    /// should be called when the first `(` is eaten. Will eat the last `)`
     fn parse_function_call(&mut self) -> Vec<ASTExpr> {
         let mut arg_vec = Vec::new();
         while match self.peek().unwrap() {
@@ -399,7 +350,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         arg_vec
     }
 
-    // doesn't eat end of expression
+    /// doesn't eat end of expression
     fn parse_expr(&mut self) -> ASTExpr {
         match self.parse_inner(0) {
             InnerReturn::ASTThing(expr) => expr,
@@ -410,14 +361,18 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_leaf(&mut self) -> ASTExpr {
         let (place, token) = self.eat().unwrap();
         let in_astexpr = match token {
-            Token::String(string) => InASTExpr::String(string),
+            &Token::String(_) => self.report_incorrect_semantics(
+                "Strings not allowed in language currently!",
+                None,
+                place,
+            ),
             &Token::Int(v) => InASTExpr::Int(v),
-             Token::Keyword(Keyword::StartParen) => {
+            Token::Keyword(Keyword::StartParen) => {
                 // create new parse scope here
                 match self.parse_inner(0) {
                     InnerReturn::ASTThing(e) => {
                         self.eat();
-                        return e
+                        return e;
                     } // eat the end parenthesis
                     _ => panic!("can't go back in parenthesis highest level???"),
                 }
@@ -433,8 +388,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     _ => InASTExpr::VarName(e),
                 }
             }
-             &t @ Token::Keyword(_) => {
-                self.report_incorrect_semantics("no keywords as leaf in expr", &t, place)
+            &t @ Token::Keyword(_) => {
+                self.report_incorrect_semantics("no keywords as leaf in expr", Some(&t), place)
             }
         };
         ASTExpr(in_astexpr, place)
@@ -464,29 +419,30 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         loop {
             match self.parse_inner(precedence) {
                 InnerReturn::ASTThing(e) => {
-                    return InnerReturn::ASTThing(ASTExpr(InASTExpr::Binary(
-                        our_binop,
-                        our_first_part,
-                        ASTBox::new(e),
-                    ), our_binop_place));
+                    return InnerReturn::ASTThing(ASTExpr(
+                        InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(e)),
+                        our_binop_place,
+                    ));
                 }
                 InnerReturn::GoBack(lower_binop, expr, lower_binop_place) => {
                     if lower_binop.precedence() >= prev_precedence {
                         // combine, but we can continue. Contain our gotten expression into the new
                         // operator will will contain us (fine because previous precedence was
                         // similar)
-                        our_first_part = ASTBox::new(ASTExpr(InASTExpr::Binary(
-                            our_binop,
-                            our_first_part,
-                            ASTBox::new(expr),
-                        ), our_binop_place));
+                        our_first_part = ASTBox::new(ASTExpr(
+                            InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)),
+                            our_binop_place,
+                        ));
                         our_binop = lower_binop;
                         our_binop_place = lower_binop_place;
                     } else {
                         // too low precedence, must go back
                         return InnerReturn::GoBack(
                             lower_binop,
-                            ASTExpr(InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)), our_binop_place),
+                            ASTExpr(
+                                InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)),
+                                our_binop_place,
+                            ),
                             lower_binop_place,
                         );
                     }
@@ -516,13 +472,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 | Keyword::Comma => return None,
                 _ => self.report_incorrect_semantics(
                     "Token not a binary operation",
-                    &res_token,
+                    Some(&res_token),
                     res_place,
                 ),
             },
             _ => return None,
         };
-        Some ((op, res_place))
+        Some((op, res_place))
     }
 }
 
@@ -538,9 +494,6 @@ pub fn print_ast(body: &ASTBody) {
         match &expr.0 {
             InASTExpr::Int(num) => {
                 println!("{:?}", num);
-            }
-            InASTExpr::String(st) => {
-                println!("{:?}", st);
             }
             InASTExpr::VarName(var_idx) => {
                 println!("var: {}", var_idx);

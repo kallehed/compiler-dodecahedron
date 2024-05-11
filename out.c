@@ -1,0 +1,4 @@
+#include <stdio.h>
+#include <stdint.h> 
+ void print_int(int64_t x){printf("%ld\n", x);}
+int64_t main();int64_t func2(int64_t var8,int64_t var9,int64_t var10,int64_t var11,int64_t var12);int64_t main(){int64_t var1;((var1)=(((((1)+(2)))*(3))));func2(((0)*(1)),((2)+(1)),((3)+(var1)),4,5);int64_t var3;((var3)=(1));int64_t var4;((var4)=(2));int64_t var5;((var5)=(((1)+(((((((3)*(2)))+(9)))+(((8)*(2))))))));int64_t var6;((var6)=(((1)+(((((2)*(3)))+(((((4)*(5)))+(((6)*(7))))))))));((var6)+=(3));print_int(((123)+(((var3)*(var4)))));while (((var3)<(10))){((var3)+=(2));((var3)+=(func2(var8,var9,var10,var11,var12)));print_int(var3);}}int64_t func2(int64_t var8,int64_t var9,int64_t var10,int64_t var11,int64_t var12){}

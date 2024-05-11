@@ -2,7 +2,7 @@ use core::panic;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::IdentifierIdx;
+use crate::IdentIdx;
 use crate::Int;
 use crate::Keyword;
 use crate::SetType;
@@ -14,7 +14,7 @@ pub enum Token {
     String(&'static str),
     Int(Int),
     Keyword(Keyword),
-    Identifier(IdentifierIdx),
+    Identifier(IdentIdx),
 }
 
 /// do not use on first char of identifier
@@ -26,7 +26,7 @@ struct Lexer {
     chars: std::iter::Peekable<std::iter::Enumerate<std::str::Chars<'static>>>,
     source: &'static str,
     tokens: Vec<Token>,
-    identifier_to_int: HashMap<&'static str, IdentifierIdx>,
+    identifier_to_int: HashMap<&'static str, IdentIdx>,
     token_idx_to_char_range: Vec<(usize, usize)>,
 
     // constant members
@@ -140,7 +140,7 @@ impl Lexer {
         let idx = match self.identifier_to_int.get(name) {
             Some(&idx) => idx,
             None => {
-                let idx = self.identifier_to_int.len() as IdentifierIdx;
+                let idx = self.identifier_to_int.len() as IdentIdx;
                 self.identifier_to_int.insert(name, idx);
                 idx
             }

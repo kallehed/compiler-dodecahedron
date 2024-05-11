@@ -1,9 +1,9 @@
 use crate::{
-    parser::{ASTBody, ASTExpr, InASTExpr, ASTStatement, BinaryOp},
-    IdentifierIdx,
+    parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp, InASTExpr},
+    IdentIdx,
 };
 
-const DEFAULT_TYPE: &str = "long ";
+const DEFAULT_TYPE: &str = "int64_t ";
 
 pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
     struct Output<'a> {
@@ -22,16 +22,16 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             self.declarations.push_str(to_out);
         }
 
-        fn function_to_c_name(&self, func: &IdentifierIdx) -> String {
+        fn function_to_c_name(&self, func: &IdentIdx) -> String {
             let real_name = self.ident_to_string[*func as usize];
             match real_name {
-                "printf" => "printf".to_string(),
+                "print_int" => "print_int".to_string(),
                 "main" => "main".to_string(),
-                _ => format!("func{}", func)
+                _ => format!("func{}", func),
             }
         }
 
-        fn var_to_c_name(&self, var: &IdentifierIdx) -> String {
+        fn var_to_c_name(&self, var: &IdentIdx) -> String {
             format!("var{}", var)
         }
 
@@ -49,11 +49,7 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             }
         }
 
-        fn function_to_c_start_of_function(
-            &self,
-            name: &IdentifierIdx,
-            args: &[IdentifierIdx],
-        ) -> String {
+        fn function_to_c_start_of_function(&self, name: &IdentIdx, args: &[IdentIdx]) -> String {
             let mut out = String::new();
 
             out.push_str(DEFAULT_TYPE);
@@ -116,11 +112,6 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 InASTExpr::Int(int) => {
                     self.print(&int.to_string());
                 }
-                InASTExpr::String(string) => {
-                    self.print("\"");
-                    self.print(string);
-                    self.print("\"");
-                }
                 InASTExpr::VarName(var_name) => {
                     self.print(&self.var_to_c_name(var_name));
                 }
@@ -136,7 +127,8 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                     }
                     self.print(")");
                 }
-                InASTExpr::Binary(op, left, right) => { // same for L-value binarys and normal exprs
+                InASTExpr::Binary(op, left, right) => {
+                    // same for L-value binarys and normal exprs
                     self.print("((");
 
                     self.expr_to_c(left);
@@ -157,7 +149,7 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
     let mut out = Output {
         code: String::new(),
-        declarations: "#include <stdio.h>\n".to_string(),
+        declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
         ident_to_string,
     };
 

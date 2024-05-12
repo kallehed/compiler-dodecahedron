@@ -22,22 +22,27 @@ fn is_identifier_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
-struct Lexer {
+struct Lexer<'a> {
     chars: std::iter::Peekable<std::iter::Enumerate<std::str::Chars<'static>>>,
-    source: &'static str,
     tokens: Vec<Token>,
     identifier_to_int: HashMap<&'static str, IdentIdx>,
     token_idx_to_char_range: Vec<(usize, usize)>,
 
     // constant members
+    file_name: &'a str,
+    source: &'static str,
     str_to_keyword: HashMap<&'static str, Keyword>,
     mathy_keywords: HashMap<&'static str, Keyword>,
     math_chars: HashSet<char>,
     single_char_repeatables: HashMap<char, Keyword>,
 }
 
-impl Lexer {
-    fn new(content: &'static str) -> Self {
+/// lexer
+pub fn generate_tokens(
+    content: &'static str,
+    file_name: &str,
+) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
+    let mut lexer = {
         // these have to be seperated by whitespace
         let str_to_keyword: HashMap<&str, Keyword> = {
             let mut map = HashMap::new();
@@ -45,6 +50,7 @@ impl Lexer {
             map.insert("if", Keyword::If);
             map.insert("while", Keyword::While);
             map.insert("fn", Keyword::FunctionIncoming);
+            map.insert("return", Keyword::Return);
             map
         };
 
@@ -89,21 +95,34 @@ impl Lexer {
             set
         };
 
-        Self {
+        Lexer {
             chars: content.chars().enumerate().peekable(),
             source: content,
             tokens: Vec::new(),
             identifier_to_int: HashMap::new(),
             token_idx_to_char_range: Vec::new(),
 
+            file_name,
             str_to_keyword,
             mathy_keywords,
             math_chars,
             single_char_repeatables,
         }
+    };
+    lexer.lex();
+    let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
+    for (string, ident) in lexer.identifier_to_int {
+        identifier_idx_to_string[ident as usize] = string;
     }
+    (
+        lexer.tokens,
+        lexer.token_idx_to_char_range,
+        identifier_idx_to_string,
+    )
+}
 
-    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, _end_wher: usize) {
+impl<'a> Lexer<'a> {
+    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, end_wher: usize) {
         // TODO print better error message
         let mut line = 1;
         let mut col = 1;
@@ -118,7 +137,11 @@ impl Lexer {
                 col += 1;
             }
         }
-        panic!("{} at line {}, col {}", msg, line, col);
+        println!("{} at line {}, col {}", msg, line, col);
+
+        println!("new error message: ");
+        crate::mark_error_in_source(self.source, self.file_name, msg, (start_wher, end_wher));
+        std::process::exit(1);
     }
 
     fn peek(&mut self) -> Option<(usize, char)> {
@@ -241,7 +264,7 @@ impl Lexer {
                         Some(&kw) => self.add_token(Token::Keyword(kw), start_idx, end_idx),
                         None => {
                             self.report_incorrect_syntax(
-                                &format!("Invalid mathy keyword: `{}`", keyword_str),
+                                &format!("Invalid operator keyword: `{}`", keyword_str),
                                 start_idx, // Error invalid mathy keyword!
                                 end_idx,
                             );
@@ -282,21 +305,4 @@ impl Lexer {
 
         println!("idents: {:?}", self.identifier_to_int);
     }
-}
-
-/// lexer
-pub fn generate_tokens(
-    content: &'static str,
-) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
-    let mut lexer = Lexer::new(content);
-    lexer.lex();
-    let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
-    for (string, ident) in lexer.identifier_to_int {
-        identifier_idx_to_string[ident as usize] = string;
-    }
-    (
-        lexer.tokens,
-        lexer.token_idx_to_char_range,
-        identifier_idx_to_string,
-    )
 }

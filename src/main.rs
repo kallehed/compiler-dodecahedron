@@ -3,34 +3,59 @@ mod lexer;
 mod parser;
 mod type_check_ast;
 
+struct CompilerFlags {
+    verbose: bool,
+}
+
 fn main() {
     println!("Hello, world!");
 
-    let file_name = {
-        let arg = std::env::args().nth(1).unwrap_or("code.dode".to_string());
-        println!("arg: {}", arg);
-        arg
-    };
+    let mut compiler_flags = CompilerFlags { verbose: false };
 
-    assert!(file_name.ends_with(".dode"));
+    // default name
+    let mut file_name = "code.dode";
+
+    // skip first, which just says name of compiler binary
+    for arg in std::env::args().skip(1) {
+        if arg.starts_with("-") {
+            for flag in arg.chars().skip(1) {
+                match flag {
+                    'v' => {
+                        compiler_flags.verbose = true;
+                    }
+                    nonexistant_flag => {
+                        println!("ERROR: flag `{}` doesn't exist!", nonexistant_flag);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        } else {
+            // it is a file name
+            file_name = arg.leak();
+        }
+    }
+
+    if !file_name.ends_with(".dode") {
+        println!(
+            "ERROR: file name must end in `.dode`! You supplied: `{}`",
+            file_name
+        );
+        std::process::exit(1);
+    }
 
     let source: &'static mut str = std::fs::read_to_string(&file_name)
         .expect("file does not exist!")
         .leak();
 
     println!(" \n--- STARTING LEXING!");
-    let (tokens, token_idx_to_char_range, ident_idx_to_string) = lexer::generate_tokens(source);
+    let (tokens, token_idx_to_char_range, ident_idx_to_string) =
+        lexer::generate_tokens(source, file_name);
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let (ast, mut functions) = parser::parse(
-        &tokens,
-        &token_idx_to_char_range,
-        source,
-        file_name.as_str(),
-    );
+    let (ast, mut functions) = parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
 
-    // add print_int function to identifiers and to ident_to_name thing. 
+    // add print_int function to identifiers and to ident_to_name thing.
     // TODO: fix having predefined functions by initially including them in the identifiers
     // and having a mapping from them to identifiers. Then also add them to the functions
     // hashmap, we could even define it before, and hand it to parser::parse, with predefined
@@ -47,7 +72,14 @@ fn main() {
     parser::print_ast(&ast);
 
     println!("\n--- Type check AST: \n");
-    type_check_ast::type_check_ast(&ast, &ident_idx_to_string, &functions, source, file_name.as_str(), &token_idx_to_char_range);
+    type_check_ast::type_check_ast(
+        &ast,
+        &ident_idx_to_string,
+        &functions,
+        source,
+        file_name,
+        &token_idx_to_char_range,
+    );
 
     //ast_interpreter::run_ast(&ast);
     let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
@@ -71,11 +103,17 @@ type Int = i64;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Keyword {
+    /// let
     CreateVar,
     If,
     While,
+    /// return 3;
+    Return,
+    /// {
     StartBlock,
+    /// }
     EndBlock,
+    /// += = -=
     Set(SetType),
     Equals,
     Plus,
@@ -134,7 +172,6 @@ fn mark_error_in_source(
         &source[latest_start_of_newline..end_of_line]
     };
 
-    println!("\n --- ERROR IN PARSING ---");
     println!("\x1b[1m\x1b[31merror:\x1b[39m {}", msg);
     // file name, line and column
     println!("\x1b[34m  --> \x1b[0m {}:{}:{}", file_name, line, col);

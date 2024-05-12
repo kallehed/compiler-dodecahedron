@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    parser::{ASTBody, ASTExpr, ASTStatement, InASTStatement, BinaryOp, InASTExpr},
+    parser::{ASTBody, ASTExpr, BinaryOp, InASTExpr, InASTStatement},
     IdentIdx,
 };
 
@@ -15,12 +15,12 @@ pub fn type_check_ast<'a>(
 ) {
     struct State<'b> {
         /// function ident and nr of parameters
-        functions: &'b HashMap<IdentIdx, u16>,
         function_calls: Vec<&'b ASTExpr>,
         /// O(1) local var exists checker
         current_vars: HashSet<IdentIdx>,
 
         // constant
+        functions: &'b HashMap<IdentIdx, u16>,
         ident_to_name: &'b [&'static str],
         source: &'b str,
         file_name: &'b str,
@@ -38,7 +38,7 @@ pub fn type_check_ast<'a>(
         fn type_check_scope(&mut self, body: &ASTBody, scope: u64) {
             let scope = scope + 1;
 
-            // holds names of local variables used in this scope. 
+            // holds names of local variables used in this scope.
             // Used to delete them from the 'global' set at end of this function
             let mut vars_in_scope = Vec::new();
             for stat in body {
@@ -51,7 +51,10 @@ pub fn type_check_ast<'a>(
                                 // TODO: now we only mark the If token, but maybe we should mark
                                 // the condition tokens as well? Maybe when implementing better
                                 // error messages.
-                                self.report_error_on_token_idx(&format!("Condition to `if` can't have type: {:?}", other), stat.1);
+                                self.report_error_on_token_idx(
+                                    &format!("Condition to `if` can't have type: {:?}", other),
+                                    stat.1,
+                                );
                             }
                         }
                         self.type_check_scope(body, scope);
@@ -61,7 +64,10 @@ pub fn type_check_ast<'a>(
                             // condition has to be Int
                             Type::Int => {}
                             other => {
-                                self.report_error_on_token_idx(&format!("Condition to `while` can't have type: {:?}", other), stat.1);
+                                self.report_error_on_token_idx(
+                                    &format!("Condition to `while` can't have type: {:?}", other),
+                                    stat.1,
+                                );
                             }
                         }
                         self.type_check_scope(body, scope);
@@ -75,13 +81,23 @@ pub fn type_check_ast<'a>(
                         if self.current_vars.contains(name) {
                             // ERROR: variable already exists!
                             // TODO: report on correct token
-                            self.report_error_on_token_idx(&format!("variable already exists, can't redeclare variable: `{}`", self.ident_to_name[*name as usize]), stat.1);
+                            self.report_error_on_token_idx(
+                                &format!(
+                                    "variable already exists, can't redeclare variable: `{}`",
+                                    self.ident_to_name[*name as usize]
+                                ),
+                                stat.1,
+                            );
                         }
                         // TODO: make sure that variable is deleted after scope ends
                         self.current_vars.insert(*name);
                         vars_in_scope.push(name);
-                    } 
-                    InASTStatement::Function { name: _ , args, body } => {
+                    }
+                    InASTStatement::Function {
+                        name: _,
+                        args,
+                        body,
+                    } => {
                         // function already checked to be correct in parsing stage
                         for &arg in args {
                             // can function arguments shadow variables outside? You can't have
@@ -93,11 +109,15 @@ pub fn type_check_ast<'a>(
                         self.type_check_scope(body, scope);
                         // TODO: refactor this so that this is automatically handled. Or maybe not,
                         // if no-one else needs this functionality
-                        
+
                         // remove variables again
                         for arg in args {
                             assert!(self.current_vars.remove(arg));
                         }
+                    }
+                    InASTStatement::Return(expr) => {
+                        // TODO continue here
+                        panic!("yo fix this part, im gonna sleep");
                     }
                 }
             }
@@ -110,20 +130,31 @@ pub fn type_check_ast<'a>(
             }
         }
 
-        fn report_error_on_token_idx(&mut self, msg: &str,  token_idx: usize) -> ! {
-            crate::mark_error_in_source(self.source, self.file_name, msg, self.token_idx_to_char_range[token_idx]);
+        fn report_error_on_token_idx(&mut self, msg: &str, token_idx: usize) -> ! {
+            crate::mark_error_in_source(
+                self.source,
+                self.file_name,
+                msg,
+                self.token_idx_to_char_range[token_idx],
+            );
             std::process::exit(1);
         }
 
         fn possibly_report_variable_nonexistance(&mut self, ident: IdentIdx, token_idx: usize) {
             if !self.current_vars.contains(&ident) {
-                self.report_error_on_token_idx(&format!("Variable `{}` does not exist!", self.ident_to_name[ident as usize]), token_idx);
+                self.report_error_on_token_idx(
+                    &format!(
+                        "Variable `{}` does not exist!",
+                        self.ident_to_name[ident as usize]
+                    ),
+                    token_idx,
+                );
             }
         }
 
         fn type_check_expr(&mut self, expr: &ASTExpr) -> Type {
             match &expr.0 {
-                InASTExpr::Int(_) => Type::Int,     // int is probably correct
+                InASTExpr::Int(_) => Type::Int, // int is probably correct
                 // varname must exist to be used!
                 InASTExpr::VarName(name) => {
                     if !self.current_vars.contains(name) {
@@ -131,7 +162,6 @@ pub fn type_check_ast<'a>(
                         self.report_error_on_token_idx("Variable has not been declared!", expr.1);
                     }
                     Type::Int // variable exists, and all variables are Int
-                    
                 }
                 InASTExpr::FunctionCall(name, args) =>
                 // make sure that function is called with correct number of arguments.
@@ -140,12 +170,26 @@ pub fn type_check_ast<'a>(
                     match self.functions.get(name) {
                         Some(&nr_of_args) => {
                             if args.len() != nr_of_args as _ {
-                                self.report_error_on_token_idx(&format!("Function `{}` called with {} argument(s), but it needs {}", &self.ident_to_name[*name as usize], args.len(),  nr_of_args), expr.1)
+                                self.report_error_on_token_idx(
+                                    &format!(
+                                        "Function `{}` called with {} argument(s), but it needs {}",
+                                        &self.ident_to_name[*name as usize],
+                                        args.len(),
+                                        nr_of_args
+                                    ),
+                                    expr.1,
+                                )
                             }
                         }
                         None => {
                             // function literally doesn't exist, why are you trying to call a nonexistent function?
-                            self.report_error_on_token_idx(&format!("Tried to call function `{}` which doesn't exist", &self.ident_to_name[*name as usize]), expr.1);
+                            self.report_error_on_token_idx(
+                                &format!(
+                                    "Tried to call function `{}` which doesn't exist",
+                                    &self.ident_to_name[*name as usize]
+                                ),
+                                expr.1,
+                            );
                         }
                     }
                     // check correctness of arguments
@@ -164,34 +208,45 @@ pub fn type_check_ast<'a>(
                                     // make sure that var name exists
                                     self.possibly_report_variable_nonexistance(name, left.1);
                                     None
-                                },
-                                InASTExpr::FunctionCall(_, _) => {
-                                    Some("function call")
                                 }
+                                InASTExpr::FunctionCall(_, _) => Some("function call"),
                                 InASTExpr::Binary(op2, _, _) => {
-                                    let string: &'static str = format!("binary operator {:?}", op2).leak();
+                                    let string: &'static str =
+                                        format!("binary operator {:?}", op2).leak();
                                     Some(string)
                                 }
                             } {
-                                self.report_error_on_token_idx(&format!("lvalue to setter `{:?}` can't be: `{}`", op, msg), left.1);
+                                self.report_error_on_token_idx(
+                                    &format!("lvalue to setter `{:?}` can't be: `{}`", op, msg),
+                                    left.1,
+                                );
                             }
 
                             // right side has to be Int
                             let right_type = self.type_check_expr(right);
                             {
-                                let should_be = Type::Int;
-                                let is = right_type;
-                                let token_idx = right.1;
-                                if should_be != is {
-                                    self.report_error_on_token_idx(&format!("Expected type `{:?}`, received type: `{:?}`!", should_be, is), token_idx);
+                                if Type::Int != right_type {
+                                    self.report_error_on_token_idx(
+                                        &format!(
+                                            "Setter operator {:?} expected it's right side to be of type `{:?}` but received type: `{:?}`!",
+                                            op, Type::Int, right_type
+                                        ),
+                                        expr.1,
+                                    );
                                 }
                             };
                             Type::Unit
                         }
-                        BinaryOp::Equals | BinaryOp::Less | BinaryOp::More | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Multiply => {
+                        BinaryOp::Equals
+                        | BinaryOp::Less
+                        | BinaryOp::More
+                        | BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Multiply => {
                             let left_type = self.type_check_expr(left);
                             let right_type = self.type_check_expr(right);
-                            if left_type != right_type { // TODO: print types without debug print
+                            if left_type != right_type {
+                                // TODO: print types without debug print
                                 self.report_error_on_token_idx(&format!("Binary operator `{:?}` received incompatible types: `{:?}`, and: `{:?}`!", op, left_type, right_type), expr.1);
                             }
 
@@ -210,7 +265,7 @@ pub fn type_check_ast<'a>(
         ident_to_name,
         source,
         file_name,
-        token_idx_to_char_range
+        token_idx_to_char_range,
     };
     s.type_check_scope(body, 0);
 }

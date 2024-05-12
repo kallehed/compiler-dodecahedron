@@ -48,6 +48,8 @@ pub enum InASTExpr {
 #[derive(Debug)]
 pub struct ASTStatement(pub InASTStatement, pub usize);
 
+/// TODO fix so some exprs are not boxed? Seems like that could be done. Don't know why they are
+/// boxed
 #[derive(Debug)]
 pub enum InASTStatement {
     If {
@@ -65,6 +67,7 @@ pub enum InASTStatement {
         args: Vec<IdentIdx>, // names of args
         body: ASTBody,
     },
+    Return(ASTExpr),
 }
 
 struct Parser<'parser_lifetime> {
@@ -223,11 +226,14 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         }
                         self.functions.insert(func_name, arg_vec.len() as _);
                     }
-                    push_to_statements(ASTStatement(InASTStatement::Function {
-                        name: func_name,
-                        args: arg_vec,
-                        body: self.parse_scope(),
-                    }, function_incoming_token));
+                    push_to_statements(ASTStatement(
+                        InASTStatement::Function {
+                            name: func_name,
+                            args: arg_vec,
+                            body: self.parse_scope(),
+                        },
+                        function_incoming_token,
+                    ));
                 }
                 // create variable with `let`
                 (create_var_token, &Token::Keyword(Keyword::CreateVar)) => {
@@ -257,18 +263,24 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             n,
                         ),
                     };
-                    push_to_statements(ASTStatement(InASTStatement::CreateVar(var_idx), create_var_token)); // create variable
+                    push_to_statements(ASTStatement(
+                        InASTStatement::CreateVar(var_idx),
+                        create_var_token,
+                    )); // create variable
 
                     // TODO: maybe use some sentinel value for token idx of EvalExpr. Current value
                     // is probably useless later 2024-5-12
-                    push_to_statements(ASTStatement(InASTStatement::EvalExpr(ASTExpr(
-                        InASTExpr::Binary(
-                            BinaryOp::Set,
-                            ASTBox::new(ASTExpr(InASTExpr::VarName(var_idx), var_token_place)),
-                            expr,
-                        ),
+                    push_to_statements(ASTStatement(
+                        InASTStatement::EvalExpr(ASTExpr(
+                            InASTExpr::Binary(
+                                BinaryOp::Set,
+                                ASTBox::new(ASTExpr(InASTExpr::VarName(var_idx), var_token_place)),
+                                expr,
+                            ),
+                            set_token_place,
+                        )),
                         set_token_place,
-                    )), set_token_place));
+                    ));
                 }
                 // If statement
                 (if_token_place, Token::Keyword(Keyword::If)) => {
@@ -283,10 +295,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         ),
                     };
                     let body = self.parse_scope();
-                    push_to_statements(ASTStatement(InASTStatement::If {
-                        condition: ASTBox::new(cond),
-                        body,
-                    }, if_token_place));
+                    push_to_statements(ASTStatement(
+                        InASTStatement::If {
+                            condition: ASTBox::new(cond),
+                            body,
+                        },
+                        if_token_place,
+                    ));
                 }
                 // While statement
                 (while_place, Token::Keyword(Keyword::While)) => {
@@ -301,10 +316,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         ),
                     };
                     let body = self.parse_scope();
-                    push_to_statements(ASTStatement(InASTStatement::While {
-                        condition: ASTBox::new(cond),
-                        body,
-                    }, while_place));
+                    push_to_statements(ASTStatement(
+                        InASTStatement::While {
+                            condition: ASTBox::new(cond),
+                            body,
+                        },
+                        while_place,
+                    ));
                 }
                 (_, Token::Keyword(Keyword::EndBlock)) => {
                     self.eat();
@@ -324,6 +342,21 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         }
                     }
                     push_to_statements(stat);
+                }
+
+                // return statement that returns from function with value
+                (place, Token::Keyword(Keyword::Return)) => {
+                    self.eat();
+                    let what_to_return = self.parse_expr();
+                    match self.eat().unwrap() {
+                        (_, Token::Keyword(Keyword::EndStatement)) => (),
+                        (n, &t) => self.report_incorrect_semantics(
+                            "Expected `;` after return expression!",
+                            Some(&t),
+                            n,
+                        ),
+                    };
+                    push_to_statements(ASTStatement(InASTStatement::Return(what_to_return), place));
                 }
 
                 (n, &t) => self.report_incorrect_semantics(
@@ -461,28 +494,29 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// DOES NOT EAT TOKEN
     fn parse_oper(&mut self) -> Option<(BinaryOp, usize)> {
         let (res_place, &res_token) = self.peek().unwrap();
+        use Token::Keyword as T;
         let op: BinaryOp = match res_token {
-            Token::Keyword(keyword) => match keyword {
-                Keyword::Plus => BinaryOp::Add,
-                Keyword::Minus => BinaryOp::Sub,
-                Keyword::Multiply => BinaryOp::Multiply,
-                Keyword::Less => BinaryOp::Less,
-                Keyword::More => BinaryOp::More,
-                Keyword::Equals => BinaryOp::Equals,
-                Keyword::Set(SetType::Add) => BinaryOp::SetAdd,
-                Keyword::Set(SetType::Sub) => BinaryOp::SetSub,
-                Keyword::Set(SetType::Set) => BinaryOp::Set,
-                Keyword::EndParen
-                | Keyword::EndStatement
-                | Keyword::StartBlock
-                | Keyword::Comma => return None,
-                _ => self.report_incorrect_semantics(
-                    "Token not a binary operation",
-                    Some(&res_token),
-                    res_place,
+            T(Keyword::Plus) => BinaryOp::Add,
+            T(Keyword::Minus) => BinaryOp::Sub,
+            T(Keyword::Multiply) => BinaryOp::Multiply,
+            T(Keyword::Less) => BinaryOp::Less,
+            T(Keyword::More) => BinaryOp::More,
+            T(Keyword::Equals) => BinaryOp::Equals,
+            T(Keyword::Set(SetType::Add)) => BinaryOp::SetAdd,
+            T(Keyword::Set(SetType::Sub)) => BinaryOp::SetSub,
+            T(Keyword::Set(SetType::Set)) => BinaryOp::Set,
+            T(Keyword::EndParen)
+            | T(Keyword::EndStatement)
+            | T(Keyword::StartBlock)
+            | T(Keyword::Comma) => return None,
+            _ => self.report_incorrect_semantics(
+                &format!(
+                    "What are you doing? Can't just put token `{:?}` here!",
+                    res_token
                 ),
-            },
-            _ => return None,
+                Some(&res_token),
+                res_place,
+            ),
         };
         Some((op, res_place))
     }
@@ -550,6 +584,10 @@ pub fn print_ast(body: &ASTBody) {
                 }
                 InASTStatement::CreateVar(var_name) => {
                     println!("Create variable: {}", var_name);
+                }
+                InASTStatement::Return(expr) => {
+                    println!("Return: ");
+                    print_expr(expr, indent + 1);
                 }
             }
         }

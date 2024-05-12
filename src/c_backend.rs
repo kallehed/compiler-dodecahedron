@@ -1,5 +1,5 @@
 use crate::{
-    parser::{ASTBody, ASTExpr, ASTStatement, InASTStatement, BinaryOp, InASTExpr},
+    parser::{ASTBody, ASTExpr, BinaryOp, InASTExpr, InASTStatement},
     IdentIdx,
 };
 
@@ -101,6 +101,11 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                     InASTStatement::CreateVar(var_name) => {
                         self.print(DEFAULT_TYPE);
                         self.print(&self.var_to_c_name(var_name));
+                        self.print(";");
+                    }
+                    InASTStatement::Return(expr) => {
+                        self.print("return ");
+                        self.expr_to_c(expr);
                         self.print(";");
                     }
                 }

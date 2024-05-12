@@ -1,5 +1,5 @@
 use crate::{
-    parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp, InASTExpr},
+    parser::{ASTBody, ASTExpr, ASTStatement, InASTStatement, BinaryOp, InASTExpr},
     IdentIdx,
 };
 
@@ -69,26 +69,26 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
         fn body_to_c(&mut self, body: &ASTBody) {
             for stat in body {
-                match stat {
-                    ASTStatement::If { condition, body } => {
+                match &stat.0 {
+                    InASTStatement::If { condition, body } => {
                         self.print("if (");
                         self.expr_to_c(condition);
                         self.print("){");
                         self.body_to_c(body);
                         self.print("}");
                     }
-                    ASTStatement::While { condition, body } => {
+                    InASTStatement::While { condition, body } => {
                         self.print("while (");
                         self.expr_to_c(condition);
                         self.print("){");
                         self.body_to_c(body);
                         self.print("}");
                     }
-                    ASTStatement::EvalExpr(expr) => {
+                    InASTStatement::EvalExpr(expr) => {
                         self.expr_to_c(expr);
                         self.print(";");
                     }
-                    ASTStatement::Function { name, args, body } => {
+                    InASTStatement::Function { name, args, body } => {
                         let first_part = self.function_to_c_start_of_function(name, args);
                         self.print(&first_part);
                         self.declare(&first_part);
@@ -98,7 +98,7 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.body_to_c(body);
                         self.print("}");
                     }
-                    ASTStatement::CreateVar(var_name) => {
+                    InASTStatement::CreateVar(var_name) => {
                         self.print(DEFAULT_TYPE);
                         self.print(&self.var_to_c_name(var_name));
                         self.print(";");

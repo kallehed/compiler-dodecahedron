@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    parser::{ASTBody, ASTExpr, ASTStatement, BinaryOp, InASTExpr},
+    parser::{ASTBody, ASTExpr, ASTStatement, InASTStatement, BinaryOp, InASTExpr},
     IdentIdx,
 };
 
@@ -17,6 +17,8 @@ pub fn type_check_ast<'a>(
         /// function ident and nr of parameters
         functions: &'b HashMap<IdentIdx, u16>,
         function_calls: Vec<&'b ASTExpr>,
+        /// O(1) local var exists checker
+        current_vars: HashSet<IdentIdx>,
 
         // constant
         ident_to_name: &'b [&'static str],
@@ -32,42 +34,79 @@ pub fn type_check_ast<'a>(
         Int,
     }
     impl State<'_> {
-        const TOP_LEVEL_SCOPE: u64 = 1;
         /// scope starts at 0 but will be immediately inc:ed to 1.
         fn type_check_scope(&mut self, body: &ASTBody, scope: u64) {
             let scope = scope + 1;
+
+            // holds names of local variables used in this scope. 
+            // Used to delete them from the 'global' set at end of this function
+            let mut vars_in_scope = Vec::new();
             for stat in body {
-                match stat {
-                    ASTStatement::If { condition, body } => {
+                match &stat.0 {
+                    InASTStatement::If { condition, body } => {
                         match self.type_check_expr(condition) {
                             // condition has to be Int
                             Type::Int => {}
                             other => {
-                                panic!("Condition to `if` can't have type: {:?}", other);
+                                // TODO: now we only mark the If token, but maybe we should mark
+                                // the condition tokens as well? Maybe when implementing better
+                                // error messages.
+                                self.report_error_on_token_idx(&format!("Condition to `if` can't have type: {:?}", other), stat.1);
                             }
                         }
                         self.type_check_scope(body, scope);
                     }
-                    ASTStatement::While { condition, body } => {
+                    InASTStatement::While { condition, body } => {
                         match self.type_check_expr(condition) {
                             // condition has to be Int
                             Type::Int => {}
                             other => {
-                                panic!("Condition to `while loop` can't have type: {:?}", other);
+                                self.report_error_on_token_idx(&format!("Condition to `while` can't have type: {:?}", other), stat.1);
                             }
                         }
                         self.type_check_scope(body, scope);
                     }
-                    ASTStatement::EvalExpr(expr) => {
+                    InASTStatement::EvalExpr(expr) => {
                         self.type_check_expr(expr);
                     }
-                    ASTStatement::CreateVar(_) => (), // TODO, check that variables are created before use.
-                    ASTStatement::Function { name, args, body } => {
+                    // TODO, check that variables are created before use.
+                    InASTStatement::CreateVar(name) => {
+                        // can't re-create variable (no variable shadowing)
+                        if self.current_vars.contains(name) {
+                            // ERROR: variable already exists!
+                            // TODO: report on correct token
+                            self.report_error_on_token_idx(&format!("variable already exists, can't redeclare variable: `{}`", self.ident_to_name[*name as usize]), stat.1);
+                        }
+                        // TODO: make sure that variable is deleted after scope ends
+                        self.current_vars.insert(*name);
+                        vars_in_scope.push(name);
+                    } 
+                    InASTStatement::Function { name: _ , args, body } => {
                         // function already checked to be correct in parsing stage
-                        // TODO make sure that function args are added to local variables in next scope when checking for variable definitions.
+                        for &arg in args {
+                            // can function arguments shadow variables outside? You can't have
+                            // arguments outside, so this is a non problem. Though we do special
+                            // check to make sure nothing wacky happens though:
+                            assert!(self.current_vars.insert(arg));
+                        }
+
                         self.type_check_scope(body, scope);
+                        // TODO: refactor this so that this is automatically handled. Or maybe not,
+                        // if no-one else needs this functionality
+                        
+                        // remove variables again
+                        for arg in args {
+                            assert!(self.current_vars.remove(arg));
+                        }
                     }
                 }
+            }
+
+            // remove local variables from 'global' variable hashset
+            for var_name in vars_in_scope {
+                assert!(self.current_vars.remove(var_name),
+                "local variables removed must exist, must not have been removed by someone else beforehand"
+                );
             }
         }
 
@@ -75,18 +114,25 @@ pub fn type_check_ast<'a>(
             crate::mark_error_in_source(self.source, self.file_name, msg, self.token_idx_to_char_range[token_idx]);
             std::process::exit(1);
         }
-        /// TODO inline/remove if only is used once
-        fn type_correct(&mut self, should_be: Type, is: Type, token_idx: usize) {
-            if should_be == is {
-                return;
+
+        fn possibly_report_variable_nonexistance(&mut self, ident: IdentIdx, token_idx: usize) {
+            if !self.current_vars.contains(&ident) {
+                self.report_error_on_token_idx(&format!("Variable `{}` does not exist!", self.ident_to_name[ident as usize]), token_idx);
             }
-            self.report_error_on_token_idx(&format!("Expected type `{:?}`, received type: `{:?}`!", should_be, is), token_idx);
         }
 
         fn type_check_expr(&mut self, expr: &ASTExpr) -> Type {
             match &expr.0 {
                 InASTExpr::Int(_) => Type::Int,     // int is probably correct
-                InASTExpr::VarName(_) => Type::Int, // vars are int, so probably correct
+                // varname must exist to be used!
+                InASTExpr::VarName(name) => {
+                    if !self.current_vars.contains(name) {
+                        // ERROR: tried to reference nonexistent variable
+                        self.report_error_on_token_idx("Variable has not been declared!", expr.1);
+                    }
+                    Type::Int // variable exists, and all variables are Int
+                    
+                }
                 InASTExpr::FunctionCall(name, args) =>
                 // make sure that function is called with correct number of arguments.
                 {
@@ -102,6 +148,10 @@ pub fn type_check_ast<'a>(
                             self.report_error_on_token_idx(&format!("Tried to call function `{}` which doesn't exist", &self.ident_to_name[*name as usize]), expr.1);
                         }
                     }
+                    // check correctness of arguments
+                    for arg in args {
+                        self.type_check_expr(arg);
+                    }
                     Type::Int
                 }
                 InASTExpr::Binary(op, left, right) => {
@@ -110,7 +160,11 @@ pub fn type_check_ast<'a>(
                             // when setting, left side has to be lvalue
                             if let Some(msg) = match left.0 {
                                 InASTExpr::Int(_) => Some("Int literal"),
-                                InASTExpr::VarName(_) => None,
+                                InASTExpr::VarName(name) => {
+                                    // make sure that var name exists
+                                    self.possibly_report_variable_nonexistance(name, left.1);
+                                    None
+                                },
                                 InASTExpr::FunctionCall(_, _) => {
                                     Some("function call")
                                 }
@@ -124,7 +178,14 @@ pub fn type_check_ast<'a>(
 
                             // right side has to be Int
                             let right_type = self.type_check_expr(right);
-                            self.type_correct(Type::Int, right_type, right.1);
+                            {
+                                let should_be = Type::Int;
+                                let is = right_type;
+                                let token_idx = right.1;
+                                if should_be != is {
+                                    self.report_error_on_token_idx(&format!("Expected type `{:?}`, received type: `{:?}`!", should_be, is), token_idx);
+                                }
+                            };
                             Type::Unit
                         }
                         BinaryOp::Equals | BinaryOp::Less | BinaryOp::More | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Multiply => {
@@ -144,6 +205,7 @@ pub fn type_check_ast<'a>(
     let mut s = State {
         functions,
         function_calls: Vec::new(),
+        current_vars: HashSet::new(),
 
         ident_to_name,
         source,

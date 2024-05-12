@@ -46,7 +46,10 @@ pub enum InASTExpr {
 }
 
 #[derive(Debug)]
-pub enum ASTStatement {
+pub struct ASTStatement(pub InASTStatement, pub usize);
+
+#[derive(Debug)]
+pub enum InASTStatement {
     If {
         condition: ASTBox<ASTExpr>,
         body: ASTBody,
@@ -154,7 +157,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 }
                 None => break,
             } {
-                (_, Token::Keyword(Keyword::FunctionIncoming)) => {
+                (function_incoming_token, Token::Keyword(Keyword::FunctionIncoming)) => {
                     self.eat();
                     // Next token should be function name identifier
                     let (func_name_token_position, func_name) = match self.eat().unwrap() {
@@ -220,14 +223,14 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         }
                         self.functions.insert(func_name, arg_vec.len() as _);
                     }
-                    push_to_statements(ASTStatement::Function {
+                    push_to_statements(ASTStatement(InASTStatement::Function {
                         name: func_name,
                         args: arg_vec,
                         body: self.parse_scope(),
-                    });
+                    }, function_incoming_token));
                 }
                 // create variable with `let`
-                (_, &Token::Keyword(Keyword::CreateVar)) => {
+                (create_var_token, &Token::Keyword(Keyword::CreateVar)) => {
                     self.eat();
                     // Next token should be variable-name
                     let (var_idx, var_token_place) = match self.eat().unwrap() {
@@ -254,18 +257,21 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             n,
                         ),
                     };
-                    push_to_statements(ASTStatement::CreateVar(var_idx)); // create variable
-                    push_to_statements(ASTStatement::EvalExpr(ASTExpr(
+                    push_to_statements(ASTStatement(InASTStatement::CreateVar(var_idx), create_var_token)); // create variable
+
+                    // TODO: maybe use some sentinel value for token idx of EvalExpr. Current value
+                    // is probably useless later 2024-5-12
+                    push_to_statements(ASTStatement(InASTStatement::EvalExpr(ASTExpr(
                         InASTExpr::Binary(
                             BinaryOp::Set,
                             ASTBox::new(ASTExpr(InASTExpr::VarName(var_idx), var_token_place)),
                             expr,
                         ),
                         set_token_place,
-                    )));
+                    )), set_token_place));
                 }
                 // If statement
-                (_, Token::Keyword(Keyword::If)) => {
+                (if_token_place, Token::Keyword(Keyword::If)) => {
                     self.eat();
                     let cond = self.parse_expr();
                     match self.eat().unwrap() {
@@ -277,13 +283,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         ),
                     };
                     let body = self.parse_scope();
-                    push_to_statements(ASTStatement::If {
+                    push_to_statements(ASTStatement(InASTStatement::If {
                         condition: ASTBox::new(cond),
                         body,
-                    });
+                    }, if_token_place));
                 }
                 // While statement
-                (_, Token::Keyword(Keyword::While)) => {
+                (while_place, Token::Keyword(Keyword::While)) => {
                     self.eat();
                     let cond = self.parse_expr();
                     match self.eat().unwrap() {
@@ -295,19 +301,19 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         ),
                     };
                     let body = self.parse_scope();
-                    push_to_statements(ASTStatement::While {
+                    push_to_statements(ASTStatement(InASTStatement::While {
                         condition: ASTBox::new(cond),
                         body,
-                    });
+                    }, while_place));
                 }
                 (_, Token::Keyword(Keyword::EndBlock)) => {
                     self.eat();
                     return statements;
                 }
                 // Function call, or just expression
-                (_, &Token::Identifier(_)) => {
+                (place, &Token::Identifier(_)) => {
                     // parse the expression. e.g. f(x) + 42
-                    let stat = ASTStatement::EvalExpr(self.parse_expr());
+                    let stat = ASTStatement(InASTStatement::EvalExpr(self.parse_expr()), place);
                     // should be semicolon after expression:
                     match self.peek().unwrap() {
                         (_, Token::Keyword(Keyword::EndStatement)) => {
@@ -516,33 +522,33 @@ pub fn print_ast(body: &ASTBody) {
     fn print_body(body: &ASTBody, indent: u64) {
         print_indent(indent);
         for statement in body {
-            match statement {
-                ASTStatement::If { condition, body } => {
+            match &statement.0 {
+                InASTStatement::If { condition, body } => {
                     println!("If:");
                     print_expr(condition, indent + 1);
                     print_indent(indent);
                     println!("Then:");
                     print_body(body, indent + 1);
                 }
-                ASTStatement::While { condition, body } => {
+                InASTStatement::While { condition, body } => {
                     println!("While:");
                     print_expr(condition, indent + 1);
                     print_indent(indent);
                     println!("Do:");
                     print_body(body, indent + 1);
                 }
-                ASTStatement::EvalExpr(expr) => {
+                InASTStatement::EvalExpr(expr) => {
                     println!("Eval following:");
                     print_expr(expr, indent + 1);
                 }
-                ASTStatement::Function { name, args, body } => {
+                InASTStatement::Function { name, args, body } => {
                     println!("Function: {}", name);
                     println!("Args: {:?}", args);
                     print_indent(indent);
                     println!("Body:");
                     print_body(body, indent + 1);
                 }
-                ASTStatement::CreateVar(var_name) => {
+                InASTStatement::CreateVar(var_name) => {
                     println!("Create variable: {}", var_name);
                 }
             }

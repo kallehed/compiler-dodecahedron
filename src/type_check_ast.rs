@@ -116,8 +116,7 @@ pub fn type_check_ast<'a>(
                         }
                     }
                     InASTStatement::Return(expr) => {
-                        // TODO continue here
-                        panic!("yo fix this part, im gonna sleep");
+                        self.type_check_expr(expr);
                     }
                 }
             }
@@ -224,22 +223,20 @@ pub fn type_check_ast<'a>(
 
                             // right side has to be Int
                             let right_type = self.type_check_expr(right);
-                            {
-                                if Type::Int != right_type {
-                                    self.report_error_on_token_idx(
-                                        &format!(
-                                            "Setter operator {:?} expected it's right side to be of type `{:?}` but received type: `{:?}`!",
-                                            op, Type::Int, right_type
-                                        ),
-                                        expr.1,
-                                    );
-                                }
-                            };
+                            if Type::Int != right_type {
+                                self.report_error_on_token_idx(
+                                    &format!(
+                                        "Setter operator {:?} expected it's right side to be of type `{:?}` but received type: `{:?}`!",
+                                        op, Type::Int, right_type
+                                    ),
+                                    expr.1,
+                                );
+                            }
                             Type::Unit
                         }
                         BinaryOp::Equals
                         | BinaryOp::Less
-                        | BinaryOp::More
+                        | BinaryOp::Greater
                         | BinaryOp::Add
                         | BinaryOp::Sub
                         | BinaryOp::Multiply => {

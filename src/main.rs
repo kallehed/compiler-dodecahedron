@@ -1,3 +1,4 @@
+mod asm_backend;
 mod c_backend;
 mod lexer;
 mod parser;
@@ -15,9 +16,11 @@ fn main() {
     // default name
     let mut file_name = "code.dode";
 
+    // TODO: make compiler handle verbose flag
     // skip first, which just says name of compiler binary
+   
     for arg in std::env::args().skip(1) {
-        if arg.starts_with("-") {
+        if arg.starts_with('-') {
             for flag in arg.chars().skip(1) {
                 match flag {
                     'v' => {
@@ -43,7 +46,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let source: &'static mut str = std::fs::read_to_string(&file_name)
+    let source: &'static mut str = std::fs::read_to_string(file_name)
         .expect("file does not exist!")
         .leak();
 
@@ -82,16 +85,32 @@ fn main() {
     );
 
     //ast_interpreter::run_ast(&ast);
-    let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
-
-    println!("\n--- Now printing C code: \n");
-    println!("{}", c_code);
-
     {
-        use std::io::Write;
-        let mut file = std::fs::File::create("out.c").unwrap();
-        file.write_all(c_code.as_bytes()).unwrap();
+        let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
+
+        println!("\n--- Now printing C code: \n");
+        println!("{}", c_code);
+    
+        {
+            use std::io::Write;
+            let mut file = std::fs::File::create("out.c").unwrap();
+            file.write_all(c_code.as_bytes()).unwrap();
+        }
     }
+
+    // generate assembly (NASM)
+    {
+        let asm = asm_backend::to_asm(&ast, &ident_idx_to_string);
+        println!("\n--- Now printing ASM: \n");
+        println!("{}", asm);
+    
+        {
+            use std::io::Write;
+            let mut file = std::fs::File::create("out.asm").unwrap();
+            file.write_all(asm.as_bytes()).unwrap();
+        }
+    }
+  
 }
 
 const STRING_DELIMITER: char = '"';

@@ -6,7 +6,7 @@ use crate::{
 };
 
 //const DEFAULT_TYPE: &str = "int64_t ";
-type RbpOffset = i64;
+type RspOffset = i64;
 type TmpLabel = i64;
 
 /// return values in RAX register. Everything else on stack using RBP (base pointer)
@@ -31,14 +31,14 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             self.code.push_str(label);
             self.println(":");
         }
-        fn print_store(&mut self, to: RbpOffset, what: &str) {
+        fn print_store(&mut self, to: RspOffset, what: &str) {
             self.println(&format!("mov qword [rsp - {}], {}", to * 8, what));
         }
         // ex: "mov rax" NO COMMA!
-        fn print_oper_on_load(&mut self, operation: &str, from: RbpOffset) {
+        fn print_oper_on_load(&mut self, operation: &str, from: RspOffset) {
             self.println(&format!("{}, [rsp - {}]", operation, from * 8))
         }
-        fn print_load(&mut self, to_register: &str, from: RbpOffset) {
+        fn print_load(&mut self, to_register: &str, from: RspOffset) {
             self.print_oper_on_load(&format!("mov {}", to_register), from);
         }
         fn get_tmp_label(&mut self) -> TmpLabel {
@@ -62,7 +62,7 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
         // vars holds the previous local variables, and will be expanded upon, but new ones will be removed at end of scope
         // holds relative position from rbp to the variable on the stack
         // tmp_place should start at 1, as on 0 we have the return address.
-        fn body_to_asm(&mut self, body: &ASTBody, vars: &mut HashMap<IdentIdx, RbpOffset>, mut tmp_place: RbpOffset) {
+        fn body_to_asm(&mut self, body: &ASTBody, vars: &mut HashMap<IdentIdx, RspOffset>, mut tmp_place: RspOffset) {
             let mut local_vars = Vec::new();
             for stat in body {
                 match &stat.0 {
@@ -72,7 +72,11 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                     InASTStatement::Function { name, args, body } => {
                         self.print_label(&self.function_to_asm_name(name));
                         // TODO: Add globals?
-                        self.body_to_asm(body, &mut HashMap::new(), 1);
+                        let mut func_vars = HashMap::new();
+                        for (idx, &arg) in args.iter().enumerate() {
+                            func_vars.insert(arg, idx as RspOffset + 1); // 0 is for return address
+                        }
+                        self.body_to_asm(body, &mut func_vars, 1 + args.len() as RspOffset);
                     }
                     &InASTStatement::CreateVar(var_name) => {
                         // assert that variable identifier does not exist previously (should be handled in semantic analysis stage)
@@ -126,7 +130,7 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             }
         }
         /// temp_place says next place to place temporary values 
-        fn expr_to_asm(&mut self, expr: &ASTExpr, vars: &mut HashMap<IdentIdx, RbpOffset>, tmp_place: RbpOffset) -> RbpOffset {
+        fn expr_to_asm(&mut self, expr: &ASTExpr, vars: &mut HashMap<IdentIdx, RspOffset>, tmp_place: RspOffset) -> RspOffset {
             match &expr.0 {
                 &InASTExpr::Int(num) => {
                     // store number into stack
@@ -138,8 +142,24 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 }
                 InASTExpr::FunctionCall(name, args) => {
                     // TODO: put arguments somewhere so function can use them
+                    let mut place_args = tmp_place;
+                    let mut places = Vec::new();
+                    for arg in args {
+                        let place = self.expr_to_asm(arg, vars, place_args);
+                        places.push(place);
+                        if place == place_args {
+                            place_args += 1;
+                        }
+                    }
+                    // place arguments onto beginning of functions stack
+                    for (idx, &place) in places.iter().enumerate().rev() {
+                        self.print_load("rax", place);
+                        // place arguments onto function stack, +1 bc fit return address
+                        self.print_store(1 + tmp_place + (idx as RspOffset), "rax");
+                    }
+
                     // move rsp down, so locals + tmps are preserved, so call will place current instr at legal place on stack
-                    let stack_move = tmp_place * 8;
+                    let stack_move = (tmp_place - 1) * 8; // call moves one step down as well, so we only need to move tmp_place - 1.
                     self.println(&format!("sub rsp, {}", stack_move));
                     self.println(&format!("call {}", self.function_to_asm_name(name)));
                     self.println(&format!("add rsp, {}", stack_move));
@@ -224,7 +244,7 @@ section .data
         print_int:\n
         mov rdi, hello_message \n
         mov rax, 0\n
-        mov rsi, [rsp + 16]\n
+        mov rsi, [rsp - 8]\n
         call printf\n
         ret\n
         ".to_string(),

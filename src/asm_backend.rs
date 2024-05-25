@@ -32,11 +32,11 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             self.println(":");
         }
         fn print_store(&mut self, to: RbpOffset, what: &str) {
-            self.println(&format!("mov qword [rbp - {}], {}", to * 8, what));
+            self.println(&format!("mov qword [rsp - {}], {}", to * 8, what));
         }
         // ex: "mov rax" NO COMMA!
         fn print_oper_on_load(&mut self, operation: &str, from: RbpOffset) {
-            self.println(&format!("{}, [rbp - {}]", operation, from * 8))
+            self.println(&format!("{}, [rsp - {}]", operation, from * 8))
         }
         fn print_load(&mut self, to_register: &str, from: RbpOffset) {
             self.print_oper_on_load(&format!("mov {}", to_register), from);
@@ -61,40 +61,42 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
         // vars holds the previous local variables, and will be expanded upon, but new ones will be removed at end of scope
         // holds relative position from rbp to the variable on the stack
-        fn body_to_asm(&mut self, body: &ASTBody, vars: &mut HashMap<IdentIdx, RbpOffset>) {
+        // tmp_place should start at 1, as on 0 we have the return address.
+        fn body_to_asm(&mut self, body: &ASTBody, vars: &mut HashMap<IdentIdx, RbpOffset>, mut tmp_place: RbpOffset) {
             let mut local_vars = Vec::new();
             for stat in body {
                 match &stat.0 {
                     InASTStatement::EvalExpr(expr) => {
-                        self.expr_to_asm(expr, vars, vars.len() as _);
+                        self.expr_to_asm(expr, vars, tmp_place);
                     }
                     InASTStatement::Function { name, args, body } => {
                         self.print_label(&self.function_to_asm_name(name));
                         // TODO: Add globals?
-                        self.body_to_asm(body, &mut HashMap::new());
+                        self.body_to_asm(body, &mut HashMap::new(), 1);
                     }
                     &InASTStatement::CreateVar(var_name) => {
                         // assert that variable identifier does not exist previously (should be handled in semantic analysis stage)
-                        assert!(vars.insert(var_name, vars.len() as _).is_none());
+                        assert!(vars.insert(var_name, tmp_place).is_none());
+                        tmp_place += 1;
                         local_vars.push(var_name);
                     }
                     InASTStatement::Return(expr) => {
-                        let place = self.expr_to_asm(expr, vars, vars.len() as _);
+                        let place = self.expr_to_asm(expr, vars, tmp_place);
                         self.print_load("rax", place);
                         self.println("ret");
                     }
                     InASTStatement::If { condition, body } => {
-                        let after_if_label = self.get_tmp_label();
-                        let label_name = self.tmp_label_to_asm_name(after_if_label);
+                        let if_end_label = self.get_tmp_label();
+                        let if_end_label_name = self.tmp_label_to_asm_name(if_end_label);
                         // do condition
-                        let cond_place = self.expr_to_asm(condition, vars, vars.len() as _);
+                        let cond_place = self.expr_to_asm(condition, vars, tmp_place);
                         self.print_load("rax", cond_place);
                         self.println("cmp rax, 0");
-                        self.println(&format!("je {}", label_name)); // jump if 0
+                        self.println(&format!("je {}", if_end_label_name)); // jump if 0
                         
-                        // NOW: output if block, and then after label
-                        self.body_to_asm(body, vars);
-                        self.print_label(&label_name);
+                        // NOW: output if block, and then end label
+                        self.body_to_asm(body, vars, tmp_place);
+                        self.print_label(&if_end_label_name);
                     }
                     InASTStatement::While { condition, body } => {
                         let while_begin_label = self.get_tmp_label();
@@ -104,13 +106,13 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         
                         self.print_label(&begin_name);
                         // do condition
-                        let cond_place = self.expr_to_asm(condition, vars, vars.len() as _);
+                        let cond_place = self.expr_to_asm(condition, vars, tmp_place);
                         self.print_load("rax", cond_place);
                         self.println("cmp rax, 0");
                         self.println(&format!("je {}", end_name)); // jump if 0
                         
                         // output while block
-                        self.body_to_asm(body, vars);
+                        self.body_to_asm(body, vars, tmp_place);
 
                         // jump back to beginning of while loop
                         self.println(&format!("jmp {}", begin_name));
@@ -124,21 +126,25 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
             }
         }
         /// temp_place says next place to place temporary values 
-        fn expr_to_asm(&mut self, expr: &ASTExpr, vars: &mut HashMap<IdentIdx, RbpOffset>, temp_place: RbpOffset) -> RbpOffset {
+        fn expr_to_asm(&mut self, expr: &ASTExpr, vars: &mut HashMap<IdentIdx, RbpOffset>, tmp_place: RbpOffset) -> RbpOffset {
             match &expr.0 {
                 &InASTExpr::Int(num) => {
                     // store number into stack
-                    self.print_store(temp_place, &format!("{}", num));
-                    temp_place
+                    self.print_store(tmp_place, &format!("{}", num));
+                    tmp_place
                 }
                 &InASTExpr::VarName(name) => { // just return already existing place for variable
                     *vars.get(&name).unwrap() as _
                 }
                 InASTExpr::FunctionCall(name, args) => {
                     // TODO: put arguments somewhere so function can use them
+                    // move rsp down, so locals + tmps are preserved, so call will place current instr at legal place on stack
+                    let stack_move = tmp_place * 8;
+                    self.println(&format!("sub rsp, {}", stack_move));
                     self.println(&format!("call {}", self.function_to_asm_name(name)));
-                    self.print_store(vars.len() as _, "rax"); // functions return from rax
-                    vars.len() as _
+                    self.println(&format!("add rsp, {}", stack_move));
+                    self.print_store(tmp_place, "rax"); // functions return from rax
+                    tmp_place
                 }
                 InASTExpr::Binary(op, left, right) => {
                     match *op {
@@ -147,7 +153,7 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                                 InASTExpr::VarName(lvalue_ident) => {
                                     // store resulting expression into rax first
                                     let lvalue_place = *vars.get(&lvalue_ident).unwrap();
-                                    let right_place = self.expr_to_asm(right, vars, temp_place);
+                                    let right_place = self.expr_to_asm(right, vars, tmp_place);
                                     self.print_load("rax", right_place);
                                     if BinaryOp::SetSub == op {
                                         self.print_oper_on_load("sub rax", lvalue_place);
@@ -162,11 +168,12 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                             }
                         }
                         op @(BinaryOp::Multiply | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Equals | BinaryOp::Less | BinaryOp::Greater) => {
-                            self.expr_to_asm(left, vars, temp_place);
-                            self.expr_to_asm(right, vars, temp_place + 1);
+                            // have to load both into memory first, as they will rewrite registers
+                            let left_place = self.expr_to_asm(left, vars, tmp_place);
+                            let right_place = self.expr_to_asm(right, vars, if left_place < tmp_place {tmp_place} else {tmp_place+1});
                             // load into registers
-                            self.print_load("rax", temp_place);
-                            self.print_load("rbx", temp_place + 1);
+                            self.print_load("rax", left_place);
+                            self.print_load("rbx", right_place);
                             
                             match op {
                                 BinaryOp::Multiply => self.println("imul rax, rbx"),
@@ -189,8 +196,8 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                                 }
                                 _ => unreachable!(),
                             }
-                            self.print_store(temp_place, "rax");
-                            temp_place
+                            self.print_store(tmp_place, "rax");
+                            tmp_place
                         }
                     }
                 }
@@ -201,24 +208,32 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
     let mut out = Output {
         code: String::new(),
-        declarations: "section .text\n
+        declarations: "
+section .data
+    hello_message db \"Hello %ld!\", 10, 0
+
+        section .text\n
         default rel\n
         global _start\n
         extern printf\n
         _start:\n
-        mov rbp, rsp\n
         call main\n
         mov rax, 60\n
         mov edi, 0\n
     	syscall\n
         print_int:\n
+        mov rdi, hello_message \n
+        mov rax, 0\n
+        mov rsi, [rsp + 16]\n
+        call printf\n
         ret\n
         ".to_string(),
         tmp_labels: 0,
         ident_to_string,
     };
 
-    out.body_to_asm(body, &mut HashMap::new());
+    // 0 because global scope doesn't have stack
+    out.body_to_asm(body, &mut HashMap::new(), 0);
     out.declarations.push_str(&out.code);
     out.declarations
 }

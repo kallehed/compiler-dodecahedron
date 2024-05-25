@@ -28,6 +28,10 @@ _start:
     mov rdx, hello_message_len
     syscall
 
+    mov rdi, string 
+    mov rax, 0
+    call printf
+
     ;;; tests
     mov rax, [rsp - 0]
     mov qword [rsp - 8], rsi
@@ -47,3 +51,4 @@ _start:
 section .data
     hello_message db "Hello, %lu!", 10, 0
     hello_message_len equ $ - hello_message
+    string: db "Hey, is this thing on?", 10, 0

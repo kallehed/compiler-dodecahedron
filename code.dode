@@ -18,6 +18,13 @@ fn main() {
         one += other(34, 10, 3 + 4, my_var, other_var);
         print_int(one);
     }
+    print_int(39 + 2 + 3 + 4 + 5);
+    print_int(39 + 2 * 0 * 2);
+    print_int(39);
+    if 1 {
+        let omegab = 696969;
+        print_int(39);
+    }
     return 42;
 }
 

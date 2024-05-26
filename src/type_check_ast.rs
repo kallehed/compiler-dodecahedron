@@ -33,10 +33,15 @@ pub fn type_check_ast<'a>(
         /// standard type for language currently
         Int,
     }
+    enum Returns {
+        No,
+        Yes,
+    }
     impl State<'_> {
         /// scope starts at 0 but will be immediately inc:ed to 1.
-        fn type_check_scope(&mut self, body: &ASTBody, scope: u64) {
-            let scope = scope + 1;
+        fn type_check_scope(&mut self, body: &ASTBody, _scope: u64) -> Returns {
+            let _scope = _scope + 1;
+            let mut returns = Returns::No;
 
             // holds names of local variables used in this scope.
             // Used to delete them from the 'global' set at end of this function
@@ -57,7 +62,7 @@ pub fn type_check_ast<'a>(
                                 );
                             }
                         }
-                        self.type_check_scope(body, scope);
+                        self.type_check_scope(body, _scope);
                     }
                     InASTStatement::While { condition, body } => {
                         match self.type_check_expr(condition) {
@@ -70,7 +75,7 @@ pub fn type_check_ast<'a>(
                                 );
                             }
                         }
-                        self.type_check_scope(body, scope);
+                        self.type_check_scope(body, _scope);
                     }
                     InASTStatement::EvalExpr(expr) => {
                         self.type_check_expr(expr);
@@ -93,23 +98,22 @@ pub fn type_check_ast<'a>(
                         self.current_vars.insert(*name);
                         vars_in_scope.push(name);
                     }
-                    InASTStatement::Function {
-                        name: _,
-                        args,
-                        body,
-                    } => {
+                    InASTStatement::Function { name, args, body } => {
                         // function already checked to be correct in parsing stage
                         for &arg in args {
-                            // can function arguments shadow variables outside? You can't have
-                            // arguments outside, so this is a non problem. Though we do special
-                            // check to make sure nothing wacky happens though:
+                            // we don't have globals yet:
                             assert!(self.current_vars.insert(arg));
                         }
 
-                        self.type_check_scope(body, scope);
-                        // TODO: refactor this so that this is automatically handled. Or maybe not,
-                        // if no-one else needs this functionality
-
+                        // Make sure that function returns across all control flow paths!
+                        let returned = self.type_check_scope(body, _scope);
+                        match returned {
+                            Returns::No => {
+                                // ERROR: function failed to return
+                                self.report_error_on_token_idx(&format!("Function `{}` does not return across all control flow paths", self.ident_to_name[*name as usize]), stat.1);
+                            }
+                            Returns::Yes => (),
+                        }
                         // remove variables again
                         for arg in args {
                             assert!(self.current_vars.remove(arg));
@@ -117,6 +121,7 @@ pub fn type_check_ast<'a>(
                     }
                     InASTStatement::Return(expr) => {
                         self.type_check_expr(expr);
+                        returns = Returns::Yes; // we have returned
                     }
                 }
             }
@@ -127,6 +132,7 @@ pub fn type_check_ast<'a>(
                 "local variables removed must exist, must not have been removed by someone else beforehand"
                 );
             }
+            returns
         }
 
         fn report_error_on_token_idx(&mut self, msg: &str, token_idx: usize) -> ! {
@@ -220,7 +226,6 @@ pub fn type_check_ast<'a>(
                                     left.1,
                                 );
                             }
-
                             // right side has to be Int
                             let right_type = self.type_check_expr(right);
                             if Type::Int != right_type {

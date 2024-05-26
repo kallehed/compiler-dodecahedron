@@ -89,11 +89,36 @@ mov qword [rsp - 16], rax
 mov qword [rsp - 16], 0
 mov rax, [rsp - 16]
 ret
+func6:
+mov qword [rsp - 8], 45
+mov rax, [rsp - 8]
+ret
+mov qword [rsp - 16], 34
+mov rax, [rsp - 16]
+mov qword [rsp - 8], rax
+mov qword [rsp - 16], 1
+mov rax, [rsp - 16]
+cmp rax, 0
+je .L2
+mov qword [rsp - 16], 3
+mov rax, [rsp - 16]
+ret
+.L2:
+.L3:
+mov qword [rsp - 16], 1
+mov rax, [rsp - 16]
+cmp rax, 0
+je .L4
+mov qword [rsp - 16], 4
+mov rax, [rsp - 16]
+ret
+jmp .L3
+.L4:
 func2:
 mov qword [rsp - 24], 0
 mov rax, [rsp - 24]
 mov qword [rsp - 16], rax
-.L2:
+.L5:
 mov rax, [rsp - 16]
 mov rbx, [rsp - 8]
 cmp rax, rbx
@@ -102,7 +127,7 @@ movzx rax, al
 mov qword [rsp - 24], rax
 mov rax, [rsp - 24]
 cmp rax, 0
-je .L3
+je .L6
 mov qword [rsp - 24], 1
 mov rax, [rsp - 24]
 add rax, [rsp - 16]
@@ -114,8 +139,8 @@ sub rsp, 16
 call print_int
 add rsp, 16
 mov qword [rsp - 24], rax
-jmp .L2
-.L3:
+jmp .L5
+.L6:
 mov qword [rsp - 24], 0
 mov rax, [rsp - 24]
 ret
@@ -126,7 +151,7 @@ mov qword [rsp - 16], rax
 mov qword [rsp - 32], 1
 mov rax, [rsp - 32]
 mov qword [rsp - 24], rax
-.L4:
+.L7:
 mov rax, [rsp - 16]
 mov rbx, [rsp - 8]
 cmp rax, rbx
@@ -135,7 +160,7 @@ movzx rax, al
 mov qword [rsp - 32], rax
 mov rax, [rsp - 32]
 cmp rax, 0
-je .L5
+je .L8
 mov rax, [rsp - 16]
 mov qword [rsp - 40], rax
 sub rsp, 24
@@ -152,8 +177,8 @@ mov rax, [rsp - 24]
 mov qword [rsp - 16], rax
 mov rax, [rsp - 32]
 mov qword [rsp - 24], rax
-jmp .L4
-.L5:
+jmp .L7
+.L8:
 mov qword [rsp - 32], 0
 mov rax, [rsp - 32]
 ret
@@ -167,11 +192,11 @@ movzx rax, al
 mov qword [rsp - 16], rax
 mov rax, [rsp - 16]
 cmp rax, 0
-je .L6
+je .L9
 mov qword [rsp - 16], 1
 mov rax, [rsp - 16]
 ret
-.L6:
+.L9:
 mov qword [rsp - 16], 1
 mov rax, [rsp - 8]
 mov rbx, [rsp - 16]

@@ -1,21 +1,28 @@
 
 section .data
-    hello_message db "Hello %ld!", 10, 0
-
+    hello_message db "%ld", 10, 0
         section .text
 
         default rel
-
+     ; important so we don't have to write rel everywhere
         global _start
 
         extern printf
 
+        extern fflush
+
+        extern stdout
+
         _start:
 
         call main
+         ; call main
+        mov rdi, [stdout]
+       ; call fflush
+        call fflush
 
         mov rax, 60
-
+      ; exit program
         mov edi, 0
 
     	syscall
@@ -34,6 +41,12 @@ section .data
 
         main:
 mov qword [rsp - 8], 1000000
+mov qword [rsp - 16], 0
+mov qword [rsp - 24], 1
+mov rax, [rsp - 24]
+mov qword [rsp - 32], rax
+mov rax, [rsp - 16]
+mov qword [rsp - 24], rax
 mov rax, [rsp - 8]
 mov qword [rsp - 16], rax
 sub rsp, 0
@@ -145,42 +158,40 @@ mov qword [rsp - 24], 0
 mov rax, [rsp - 24]
 ret
 func1:
-mov qword [rsp - 24], 0
-mov rax, [rsp - 24]
-mov qword [rsp - 16], rax
-mov qword [rsp - 32], 1
-mov rax, [rsp - 32]
-mov qword [rsp - 24], rax
-.L7:
 mov rax, [rsp - 16]
+mov qword [rsp - 32], rax
+mov rax, [rsp - 24]
+mov qword [rsp - 40], rax
+.L7:
+mov rax, [rsp - 32]
 mov rbx, [rsp - 8]
 cmp rax, rbx
 setl al
 movzx rax, al
-mov qword [rsp - 32], rax
-mov rax, [rsp - 32]
+mov qword [rsp - 48], rax
+mov rax, [rsp - 48]
 cmp rax, 0
 je .L8
-mov rax, [rsp - 16]
-mov qword [rsp - 40], rax
-sub rsp, 24
+mov rax, [rsp - 32]
+mov qword [rsp - 56], rax
+sub rsp, 40
 call print_int
-add rsp, 24
-mov qword [rsp - 32], rax
-mov rax, [rsp - 16]
-mov rbx, [rsp - 24]
+add rsp, 40
+mov qword [rsp - 48], rax
+mov rax, [rsp - 32]
+mov rbx, [rsp - 40]
 add rax, rbx
-mov qword [rsp - 40], rax
+mov qword [rsp - 56], rax
+mov rax, [rsp - 56]
+mov qword [rsp - 48], rax
 mov rax, [rsp - 40]
 mov qword [rsp - 32], rax
-mov rax, [rsp - 24]
-mov qword [rsp - 16], rax
-mov rax, [rsp - 32]
-mov qword [rsp - 24], rax
+mov rax, [rsp - 48]
+mov qword [rsp - 40], rax
 jmp .L7
 .L8:
-mov qword [rsp - 32], 0
-mov rax, [rsp - 32]
+mov qword [rsp - 48], 0
+mov rax, [rsp - 48]
 ret
 func5:
 mov qword [rsp - 16], 2

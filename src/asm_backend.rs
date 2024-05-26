@@ -252,15 +252,18 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
         code: String::new(),
         declarations: "
 section .data
-    hello_message db \"Hello %ld!\", 10, 0
-
+    hello_message db \"%ld\", 10, 0
         section .text\n
-        default rel\n
+        default rel\n     ; important so we don't have to write rel everywhere
         global _start\n
         extern printf\n
+        extern fflush\n
+        extern stdout\n
         _start:\n
-        call main\n
-        mov rax, 60\n
+        call main\n         ; call main
+        mov rdi, [stdout]\n       ; call fflush
+        call fflush\n
+        mov rax, 60\n      ; exit program
         mov edi, 0\n
     	syscall\n
         print_int:\n

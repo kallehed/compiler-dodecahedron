@@ -143,7 +143,7 @@ pub fn type_check_ast<'a>(
             if !self.current_vars.contains(&ident) {
                 self.report_error_on_token_idx(
                     &format!(
-                        "Variable `{}` does not exist!",
+                        "Variable `{}` must be declared before usage!",
                         self.ident_to_name[ident as usize]
                     ),
                     token_idx,

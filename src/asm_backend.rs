@@ -62,7 +62,12 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
         // vars holds the previous local variables, and will be expanded upon, but new ones will be removed at end of scope
         // holds relative position from rbp to the variable on the stack
         // tmp_place should start at 1, as on 0 we have the return address.
-        fn body_to_asm(&mut self, body: &ASTBody, vars: &mut HashMap<IdentIdx, RspOffset>, mut tmp_place: RspOffset) {
+        fn body_to_asm(
+            &mut self,
+            body: &ASTBody,
+            vars: &mut HashMap<IdentIdx, RspOffset>,
+            mut tmp_place: RspOffset,
+        ) {
             let mut local_vars = Vec::new();
             for stat in body {
                 match &stat.0 {
@@ -97,7 +102,7 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.print_load("rax", cond_place);
                         self.println("cmp rax, 0");
                         self.println(&format!("je {}", if_end_label_name)); // jump if 0
-                        
+
                         // NOW: output if block, and then end label
                         self.body_to_asm(body, vars, tmp_place);
                         self.print_label(&if_end_label_name);
@@ -107,14 +112,14 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         let while_end_label = self.get_tmp_label();
                         let begin_name = self.tmp_label_to_asm_name(while_begin_label);
                         let end_name = self.tmp_label_to_asm_name(while_end_label);
-                        
+
                         self.print_label(&begin_name);
                         // do condition
                         let cond_place = self.expr_to_asm(condition, vars, tmp_place);
                         self.print_load("rax", cond_place);
                         self.println("cmp rax, 0");
                         self.println(&format!("je {}", end_name)); // jump if 0
-                        
+
                         // output while block
                         self.body_to_asm(body, vars, tmp_place);
 
@@ -129,15 +134,21 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 vars.remove(local);
             }
         }
-        /// temp_place says next place to place temporary values 
-        fn expr_to_asm(&mut self, expr: &ASTExpr, vars: &mut HashMap<IdentIdx, RspOffset>, tmp_place: RspOffset) -> RspOffset {
+        /// temp_place says next place to place temporary values
+        fn expr_to_asm(
+            &mut self,
+            expr: &ASTExpr,
+            vars: &mut HashMap<IdentIdx, RspOffset>,
+            tmp_place: RspOffset,
+        ) -> RspOffset {
             match &expr.0 {
                 &InASTExpr::Int(num) => {
                     // store number into stack
                     self.print_store(tmp_place, &format!("{}", num));
                     tmp_place
                 }
-                &InASTExpr::VarName(name) => { // just return already existing place for variable
+                &InASTExpr::VarName(name) => {
+                    // just return already existing place for variable
                     *vars.get(&name).unwrap() as _
                 }
                 InASTExpr::FunctionCall(name, args) => {
@@ -168,7 +179,7 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 }
                 InASTExpr::Binary(op, left, right) => {
                     match *op {
-                        op @(BinaryOp::Set | BinaryOp::SetSub | BinaryOp::SetAdd)  => {
+                        op @ (BinaryOp::Set | BinaryOp::SetSub | BinaryOp::SetAdd) => {
                             match left.0 {
                                 InASTExpr::VarName(lvalue_ident) => {
                                     // store resulting expression into rax first
@@ -177,24 +188,36 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                                     self.print_load("rax", right_place);
                                     if BinaryOp::SetSub == op {
                                         self.print_oper_on_load("sub rax", lvalue_place);
-                                    }
-                                    else if BinaryOp::SetAdd == op {
+                                    } else if BinaryOp::SetAdd == op {
                                         self.print_oper_on_load("add rax", lvalue_place);
                                     }
                                     self.print_store(lvalue_place, "rax");
                                     -1 // This can never be used as a value so...
                                 }
-                                _ => panic!("left hand side MUST be lvalue") 
+                                _ => panic!("left hand side MUST be lvalue"),
                             }
                         }
-                        op @(BinaryOp::Multiply | BinaryOp::Add | BinaryOp::Sub | BinaryOp::Equals | BinaryOp::Less | BinaryOp::Greater) => {
+                        op @ (BinaryOp::Multiply
+                        | BinaryOp::Add
+                        | BinaryOp::Sub
+                        | BinaryOp::Equals
+                        | BinaryOp::Less
+                        | BinaryOp::Greater) => {
                             // have to load both into memory first, as they will rewrite registers
                             let left_place = self.expr_to_asm(left, vars, tmp_place);
-                            let right_place = self.expr_to_asm(right, vars, if left_place < tmp_place {tmp_place} else {tmp_place+1});
+                            let right_place = self.expr_to_asm(
+                                right,
+                                vars,
+                                if left_place < tmp_place {
+                                    tmp_place
+                                } else {
+                                    tmp_place + 1
+                                },
+                            );
                             // load into registers
                             self.print_load("rax", left_place);
                             self.print_load("rbx", right_place);
-                            
+
                             match op {
                                 BinaryOp::Multiply => self.println("imul rax, rbx"),
                                 BinaryOp::Add => self.println("add rax, rbx"),
@@ -223,7 +246,6 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 }
             }
         }
-
     }
 
     let mut out = Output {
@@ -247,7 +269,8 @@ section .data
         mov rsi, [rsp - 8]\n
         call printf\n
         ret\n
-        ".to_string(),
+        "
+        .to_string(),
         tmp_labels: 0,
         ident_to_string,
     };

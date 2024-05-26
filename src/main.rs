@@ -18,7 +18,7 @@ fn main() {
 
     // TODO: make compiler handle verbose flag
     // skip first, which just says name of compiler binary
-   
+
     for arg in std::env::args().skip(1) {
         if arg.starts_with('-') {
             for flag in arg.chars().skip(1) {
@@ -90,7 +90,7 @@ fn main() {
 
         println!("\n--- Now printing C code: \n");
         println!("{}", c_code);
-    
+
         {
             use std::io::Write;
             let mut file = std::fs::File::create("out.c").unwrap();
@@ -103,14 +103,13 @@ fn main() {
         let asm = asm_backend::to_asm(&ast, &ident_idx_to_string);
         println!("\n--- Now printing ASM: \n");
         println!("{}", asm);
-    
+
         {
             use std::io::Write;
             let mut file = std::fs::File::create("out.asm").unwrap();
             file.write_all(asm.as_bytes()).unwrap();
         }
     }
-  
 }
 
 const STRING_DELIMITER: char = '"';

@@ -1,6 +1,8 @@
 
 section .data
+
     hello_message db "%ld", 10, 0
+
         section .text
 
         default rel
@@ -40,6 +42,13 @@ section .data
         ret
 
         main:
+mov qword [rsp - 8], 3
+mov rax, [rsp - 8]
+mov qword [rsp - 16], rax
+sub rsp, 0
+call print_int
+add rsp, 0
+mov qword [rsp - 8], rax
 mov qword [rsp - 8], 1000000
 mov qword [rsp - 16], 0
 mov qword [rsp - 24], 1
@@ -50,14 +59,14 @@ mov qword [rsp - 24], rax
 mov rax, [rsp - 8]
 mov qword [rsp - 16], rax
 sub rsp, 0
-call func1
+call func2
 add rsp, 0
 mov qword [rsp - 8], rax
 mov qword [rsp - 8], 5
 mov rax, [rsp - 8]
 mov qword [rsp - 16], rax
 sub rsp, 0
-call func2
+call func3
 add rsp, 0
 mov qword [rsp - 8], rax
 mov qword [rsp - 16], 1
@@ -96,7 +105,7 @@ mov qword [rsp - 16], 3
 mov rax, [rsp - 16]
 mov qword [rsp - 24], rax
 sub rsp, 8
-call func2
+call func3
 add rsp, 8
 mov qword [rsp - 16], rax
 mov qword [rsp - 16], 0
@@ -127,7 +136,7 @@ mov rax, [rsp - 16]
 ret
 jmp .L3
 .L4:
-func2:
+func3:
 mov qword [rsp - 24], 0
 mov rax, [rsp - 24]
 mov qword [rsp - 16], rax
@@ -157,7 +166,7 @@ jmp .L5
 mov qword [rsp - 24], 0
 mov rax, [rsp - 24]
 ret
-func1:
+func2:
 mov rax, [rsp - 16]
 mov qword [rsp - 32], rax
 mov rax, [rsp - 24]

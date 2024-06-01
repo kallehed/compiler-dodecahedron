@@ -21,6 +21,8 @@ Program correctness thoughts:
    let each block have a Vec of their declared variables, and let a block remove it's variables after it has run out.
 - Should every AST node have a source reference, like, char range? Yes
 
+TODO: Don't allow nested functions, right now: bad behaviour.
+
 # Notes on running things:
 
 run program after c backend done:

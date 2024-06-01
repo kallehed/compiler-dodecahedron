@@ -1,5 +1,7 @@
 fn main() {
 
+    print_int(1 + 2);
+
     fibb(1000000, 0, 1);
     print_zeroes(5);
 

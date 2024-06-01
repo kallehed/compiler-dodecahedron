@@ -1,8 +1,8 @@
 mod asm_backend;
+mod ast_verify;
 mod c_backend;
 mod lexer;
 mod parser;
-mod type_check_ast;
 
 struct CompilerFlags {
     verbose: bool,
@@ -56,7 +56,8 @@ fn main() {
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let (ast, mut functions) = parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
+    let (mut ast, mut functions) =
+        parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
 
     // add print_int function to identifiers and to ident_to_name thing.
     // TODO: fix having predefined functions by initially including them in the identifiers
@@ -75,8 +76,8 @@ fn main() {
     parser::print_ast(&ast);
 
     println!("\n--- Type check AST: \n");
-    type_check_ast::type_check_ast(
-        &ast,
+    ast_verify::run(
+        &mut ast,
         &ident_idx_to_string,
         &functions,
         source,

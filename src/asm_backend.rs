@@ -251,8 +251,8 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
     let mut out = Output {
         code: String::new(),
         declarations: "
-section .data
-    hello_message db \"%ld\", 10, 0
+section .data\n
+    hello_message db \"%ld\", 10, 0\n
         section .text\n
         default rel\n     ; important so we don't have to write rel everywhere
         global _start\n

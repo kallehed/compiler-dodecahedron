@@ -53,7 +53,7 @@ pub struct ASTStatement(pub InASTStatement, pub usize);
 #[derive(Debug)]
 pub enum InASTStatement {
     If {
-        condition: ASTBox<ASTExpr>,
+        condition: ASTExpr,
         body: ASTBody,
     },
     While {
@@ -299,7 +299,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     let body = self.parse_scope();
                     push_to_statements(ASTStatement(
                         InASTStatement::If {
-                            condition: ASTBox::new(cond),
+                            condition: cond,
                             body,
                         },
                         if_token_place,

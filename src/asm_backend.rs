@@ -128,6 +128,9 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
 
                         self.print_label(&end_name); // end label
                     }
+                    InASTStatement::Block(block) => {
+                        self.body_to_asm(block, vars, tmp_place);
+                    }
                 }
             }
             for local in local_vars.iter() {

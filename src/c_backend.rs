@@ -108,6 +108,11 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.expr_to_c(expr);
                         self.print(";");
                     }
+                    InASTStatement::Block(block) => {
+                        self.print("{");
+                        self.body_to_c(block);
+                        self.print("}");
+                    }
                 }
             }
         }

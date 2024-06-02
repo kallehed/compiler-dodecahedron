@@ -68,6 +68,8 @@ pub enum InASTStatement {
         body: ASTBody,
     },
     Return(ASTExpr),
+    /// {}
+    Block(ASTBody),
 }
 
 struct Parser<'parser_lifetime> {
@@ -358,6 +360,11 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     };
                     push_to_statements(ASTStatement(InASTStatement::Return(what_to_return), place));
                 }
+                (place, Token::Keyword(Keyword::StartBlock)) => {
+                    self.eat();
+                    let scope_body = self.parse_scope();
+                    push_to_statements(ASTStatement(InASTStatement::Block(scope_body), place));
+                }
 
                 (n, &t) => self.report_incorrect_semantics(
                     "Erroneous token to start statement with",
@@ -588,6 +595,12 @@ pub fn print_ast(body: &ASTBody) {
                 InASTStatement::Return(expr) => {
                     println!("Return: ");
                     print_expr(expr, indent + 1);
+                }
+                InASTStatement::Block(block) => {
+                    println!("Block: ");
+                    print_indent(indent);
+                    println!("Body:");
+                    print_body(block, indent + 1);
                 }
             }
         }

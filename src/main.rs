@@ -7,11 +7,10 @@ mod parser;
 struct CompilerFlags {
     verbose: bool,
 }
+static mut FLAGS: CompilerFlags = CompilerFlags { verbose: false };
 
 fn main() {
     println!("Hello, world!");
-
-    let mut compiler_flags = CompilerFlags { verbose: false };
 
     // default name
     let mut file_name = "code.dode";
@@ -24,7 +23,7 @@ fn main() {
             for flag in arg.chars().skip(1) {
                 match flag {
                     'v' => {
-                        compiler_flags.verbose = true;
+                        unsafe { FLAGS.verbose = true };
                     }
                     nonexistant_flag => {
                         println!("ERROR: flag `{}` doesn't exist!", nonexistant_flag);
@@ -103,7 +102,7 @@ fn main() {
     {
         let asm = asm_backend::to_asm(&ast, &ident_idx_to_string);
         println!("\n--- Now printing ASM: \n");
-        println!("{}", asm);
+        // println!("{}", asm);
 
         {
             use std::io::Write;

@@ -12,8 +12,8 @@ pub type ASTBody = Vec<ASTStatement>;
 /// Binary operators with precedence as integer representation
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum BinaryOp {
-    // numbers specify their precedence. Higher means it should be evaluated first
-    // ZERO is RESERVED for algorithm!!!!!!!!
+    // numbers specify their precedence. Higher is higher precedence
+    // ZERO is RESERVED for algorithm,
     SetAdd = 1,
     SetSub = 2,
     Set = 3,
@@ -25,7 +25,8 @@ pub enum BinaryOp {
     Multiply = 9,
 }
 
-type BinOpPrecedence = u8;
+/// 0 is start of precedence, > 0 is normal operators. -1 is END OF EXPRESSION don't look further
+type BinOpPrecedence = i8;
 
 impl BinaryOp {
     fn precedence(self) -> BinOpPrecedence {
@@ -106,11 +107,6 @@ pub fn parse(
     let ast = parser.parse_scope();
 
     (ast, parser.functions)
-}
-enum InnerReturn {
-    ASTThing(ASTExpr),
-    /// operation, expression, token index of BinaryOp
-    GoBack(BinaryOp, ASTExpr, usize),
 }
 
 impl<'parser_lifetime> Parser<'parser_lifetime> {
@@ -375,6 +371,36 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         }
         statements
     }
+    fn parse_primary(&mut self) -> ASTExpr {
+        let (place, token) = self.eat().unwrap();
+        let in_astexpr = match token {
+            &Token::String(_) => self.report_incorrect_semantics(
+                "Strings not allowed in language currently!",
+                None,
+                place,
+            ),
+            &Token::Int(v) => InASTExpr::Int(v),
+            Token::Keyword(Keyword::StartParen) => {
+                let inner_expr = self.parse_expr();
+                self.eat(); // eat the end parenthesis
+                return inner_expr; // forget about paren token place
+            }
+            &Token::Identifier(e) => {
+                // can either be a variable or a function call
+                match self.peek().unwrap() {
+                    (_, Token::Keyword(Keyword::StartParen)) => {
+                        self.eat(); // eat start paren
+                        InASTExpr::FunctionCall(e, self.parse_function_call())
+                    }
+                    _ => InASTExpr::VarName(e),
+                }
+            }
+            &t @ Token::Keyword(_) => {
+                self.report_incorrect_semantics("no keywords as primary in expr", Some(&t), place)
+            }
+        };
+        ASTExpr(in_astexpr, place)
+    }
 
     /// should be called when the first `(` is eaten. Will eat the last `)`
     fn parse_function_call(&mut self) -> Vec<ASTExpr> {
@@ -398,108 +424,41 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
 
     /// doesn't eat end of expression
     fn parse_expr(&mut self) -> ASTExpr {
-        match self.parse_inner(0) {
-            InnerReturn::ASTThing(expr) => expr,
-            InnerReturn::GoBack(_, _, _) => panic!("Can't go back in highest level???"),
-        }
+        // TODO: add prefix unary operator parsing here
+        let left = self.parse_primary();
+
+        return self.parse_binop_and_right(0, left);
     }
 
-    fn parse_leaf(&mut self) -> ASTExpr {
-        let (place, token) = self.eat().unwrap();
-        let in_astexpr = match token {
-            &Token::String(_) => self.report_incorrect_semantics(
-                "Strings not allowed in language currently!",
-                None,
-                place,
-            ),
-            &Token::Int(v) => InASTExpr::Int(v),
-            Token::Keyword(Keyword::StartParen) => {
-                // create new parse scope here
-                match self.parse_inner(0) {
-                    InnerReturn::ASTThing(e) => {
-                        self.eat();
-                        return e;
-                    } // eat the end parenthesis
-                    _ => panic!("can't go back in parenthesis highest level???"),
-                }
-            }
-            &Token::Identifier(e) => {
-                // can either be a variable or a function call
-                match self.peek().unwrap() {
-                    (_, Token::Keyword(Keyword::StartParen)) => {
-                        // function call
-                        self.eat(); // eat start paren
-                        InASTExpr::FunctionCall(e, self.parse_function_call())
-                    }
-                    _ => InASTExpr::VarName(e),
-                }
-            }
-            &t @ Token::Keyword(_) => {
-                self.report_incorrect_semantics("no keywords as leaf in expr", Some(&t), place)
-            }
-        };
-        ASTExpr(in_astexpr, place)
-    }
-
-    fn parse_inner(&mut self, prev_precedence: BinOpPrecedence) -> InnerReturn {
-        let value = self.parse_leaf();
-
-        let (binop, binop_place) = match self.parse_oper() {
-            Some(binop) => binop,
-            None => {
-                // no operator, return value
-                return InnerReturn::ASTThing(value);
-            }
-        };
-        self.eat(); // eat operator
-        let precedence = binop.precedence();
-        if precedence < prev_precedence {
-            // we have to back and collect things in this "precedence block"
-            return InnerReturn::GoBack(binop, value, binop_place);
-        }
-
-        let mut our_first_part = ASTBox::new(value);
-        let mut our_binop = binop;
-        let mut our_binop_place = binop_place;
-
+    fn parse_binop_and_right(&mut self, prev_prec: BinOpPrecedence, mut left: ASTExpr) -> ASTExpr {
         loop {
-            match self.parse_inner(precedence) {
-                InnerReturn::ASTThing(e) => {
-                    return InnerReturn::ASTThing(ASTExpr(
-                        InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(e)),
-                        our_binop_place,
-                    ));
-                }
-                InnerReturn::GoBack(lower_binop, expr, lower_binop_place) => {
-                    if lower_binop.precedence() >= prev_precedence {
-                        // combine, but we can continue. Contain our gotten expression into the new
-                        // operator will will contain us (fine because previous precedence was
-                        // similar)
-                        our_first_part = ASTBox::new(ASTExpr(
-                            InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)),
-                            our_binop_place,
-                        ));
-                        our_binop = lower_binop;
-                        our_binop_place = lower_binop_place;
-                    } else {
-                        // too low precedence, must go back
-                        return InnerReturn::GoBack(
-                            lower_binop,
-                            ASTExpr(
-                                InASTExpr::Binary(our_binop, our_first_part, ASTBox::new(expr)),
-                                our_binop_place,
-                            ),
-                            lower_binop_place,
-                        );
-                    }
-                }
+            let (binop, our_prec, binop_place) = self.parse_oper();
+            // if find binop that is LESS binding, have to go back and create expr for this like going from  * to +
+            if our_prec < prev_prec {
+                return left; // also, if reached end -> prec will be -1, so goes back
             }
+            self.eat(); // eat operator
+
+            // get right hand side
+            let mut right = self.parse_primary();
+            // peek at operator after right hand side
+            let (_, next_prec, _) = self.parse_oper();
+            // now we have (a+b), though if the precedence AFTER binds tighter, this is actually a + (b * ...)
+            if next_prec > our_prec {
+                right = self.parse_binop_and_right(our_prec + 1, right);
+            }
+            // merge left and right
+            left = ASTExpr(
+                InASTExpr::Binary(binop, ASTBox::new(left), ASTBox::new(right)),
+                binop_place,
+            );
         }
     }
 
-    /// returns possible BinaryOp and it's token index.
+    /// returns BinaryOp, it's precedence and it's token index.
     /// DOES NOT EAT TOKEN
-    fn parse_oper(&mut self) -> Option<(BinaryOp, usize)> {
+    /// if ` ; ) } ` ... returns None
+    fn parse_oper(&mut self) -> (BinaryOp, BinOpPrecedence, usize) {
         let (res_place, &res_token) = self.peek().unwrap();
         use Token::Keyword as T;
         let op: BinaryOp = match res_token {
@@ -515,7 +474,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             T(Keyword::EndParen)
             | T(Keyword::EndStatement)
             | T(Keyword::StartBlock)
-            | T(Keyword::Comma) => return None,
+            | T(Keyword::Comma) => return (BinaryOp::Add, -1, 0), // -1 precedence, end of expr
+
             _ => self.report_incorrect_semantics(
                 &format!(
                     "What are you doing? Can't just put token `{:?}` here!",
@@ -525,7 +485,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 res_place,
             ),
         };
-        Some((op, res_place))
+        (op, op.precedence(), res_place)
     }
 }
 

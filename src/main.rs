@@ -71,9 +71,6 @@ fn main() {
 
     println!("\n FINAL AST: {:?}", ast);
 
-    println!("\n--- tree version: \n");
-    parser::print_ast(&ast);
-
     println!("\n--- Type check AST: \n");
     ast_verify::run(
         &mut ast,

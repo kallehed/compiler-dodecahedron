@@ -108,6 +108,22 @@ pub fn parse(
 
     (ast, parser.functions)
 }
+macro_rules! eat_require {
+    ($self:ident, $the_pattern:pat, $msg:literal) => {
+        match { $self.eat().unwrap() } {
+            (n, $the_pattern) => n,
+            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+        }
+    };
+}
+macro_rules! eat_require_get {
+    ($self:ident, $the_pattern:path, $msg:literal) => {
+        match $self.eat().unwrap() {
+            (n, &$the_pattern(a)) => (n, a),
+            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+        }
+    };
+}
 
 impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn eat(&mut self) -> Option<(usize, &Token)> {
@@ -151,33 +167,36 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         };
 
         loop {
-            match match self.peek() {
-                Some(tok) => {
-                    println!("token {:?}", tok);
-                    tok
-                }
+            let (place, &token) = match self.peek() {
+                Some(tok) => tok,
                 None => break,
-            } {
-                (function_incoming_token, Token::Keyword(Keyword::FunctionIncoming)) => {
+            };
+            println!("token {:?}", token);
+            match &token {
+                Token::Keyword(Keyword::FunctionIncoming) => {
                     self.eat();
                     // Next token should be function name identifier
-                    let (func_name_token_position, func_name) = match self.eat().unwrap() {
-                        (p, &Token::Identifier(func_name)) => (p, func_name),
-                        (tok_nr, &tok) => self.report_incorrect_semantics(
-                            "Expected function name identifier",
-                            Some(&tok),
-                            tok_nr,
-                        ),
+                    let func_name = {
+                        let (func_name_place, func_name) = eat_require_get!(
+                            self,
+                            Token::Identifier,
+                            "Expected function name identifier"
+                        );
+                        if self.functions.contains_key(&func_name) {
+                            self.report_incorrect_semantics(
+                                "Function with same name already declared!",
+                                None,
+                                func_name_place,
+                            )
+                        }
+                        func_name
                     };
                     // Next token should be start paren
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::StartParen)) => (),
-                        (tok_nr, &tok) => self.report_incorrect_semantics(
-                            "Expected start parenthesis after function name",
-                            Some(&tok),
-                            tok_nr,
-                        ),
-                    };
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::StartParen),
+                        "Expected start parenthesis after function name"
+                    );
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut arg_vec = Vec::new();
                     loop {
@@ -203,68 +222,43 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                     }
                     // must be { after this
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, &t) => self.report_incorrect_semantics(
-                            "Expected `{` after function declaration",
-                            Some(&t),
-                            n,
-                        ),
-                    };
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::StartBlock),
+                        "Expected `{` after function declaration"
+                    );
+                    self.functions.insert(func_name, arg_vec.len() as _);
 
-                    {
-                        // add function to function hashmap
-                        if self.functions.contains_key(&func_name) {
-                            // functions already exists, error!
-                            self.report_incorrect_semantics(
-                                "Function with same name already declared!",
-                                None,
-                                func_name_token_position,
-                            )
-                        }
-                        self.functions.insert(func_name, arg_vec.len() as _);
-                    }
                     push_to_statements(ASTStatement(
                         InASTStatement::Function {
                             name: func_name,
                             args: arg_vec,
                             body: self.parse_scope(),
                         },
-                        function_incoming_token,
+                        place,
                     ));
                 }
                 // create variable with `let`
-                (create_var_token, &Token::Keyword(Keyword::CreateVar)) => {
+                &Token::Keyword(Keyword::CreateVar) => {
                     self.eat();
                     // Next token should be variable-name
-                    let (var_idx, var_token_place) = match self.eat().unwrap() {
-                        (p, &Token::Identifier(var_idx)) => (var_idx, p),
-                        (n, &t) => {
-                            self.report_incorrect_semantics("expected variable name", Some(&t), n)
-                        }
-                    };
+                    let (var_token_place, var_idx) =
+                        eat_require_get!(self, Token::Identifier, "expected variable name");
                     // make sure there is a SET token after var name
-                    let set_token_place = match self.eat().unwrap() {
-                        (p, Token::Keyword(Keyword::Set(SetType::Set))) => p,
-                        (n, &t) => {
-                            self.report_incorrect_semantics("expected set token", Some(&t), n)
-                        }
-                    };
+                    let set_token_place = eat_require!(
+                        self,
+                        Token::Keyword(Keyword::Set(SetType::Set)),
+                        "expected set token"
+                    );
                     // now there should be an expression
                     let expr = ASTBox::new(self.parse_expr());
                     // it should end with a semicolon
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::EndStatement)) => (),
-                        (n, &t) => self.report_incorrect_semantics(
-                            "expected `;` after variable declaration",
-                            Some(&t),
-                            n,
-                        ),
-                    };
-                    push_to_statements(ASTStatement(
-                        InASTStatement::CreateVar(var_idx),
-                        create_var_token,
-                    )); // create variable
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::EndStatement),
+                        "expected `;` after variable declaration"
+                    );
+                    push_to_statements(ASTStatement(InASTStatement::CreateVar(var_idx), place)); // create variable
 
                     // TODO: maybe use some sentinel value for token idx of EvalExpr. Current value
                     // is probably useless later 2024-5-12
@@ -281,91 +275,79 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     ));
                 }
                 // If statement
-                (if_token_place, Token::Keyword(Keyword::If)) => {
+                Token::Keyword(Keyword::If) => {
                     self.eat();
                     let cond = self.parse_expr();
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, &t) => self.report_incorrect_semantics(
-                            "Expected `{` after if condition",
-                            Some(&t),
-                            n,
-                        ),
-                    };
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::StartBlock),
+                        "Expected `{` after if condition"
+                    );
                     let body = self.parse_scope();
                     push_to_statements(ASTStatement(
                         InASTStatement::If {
                             condition: cond,
                             body,
                         },
-                        if_token_place,
+                        place,
                     ));
                 }
                 // While statement
-                (while_place, Token::Keyword(Keyword::While)) => {
+                Token::Keyword(Keyword::While) => {
                     self.eat();
                     let cond = self.parse_expr();
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::StartBlock)) => (),
-                        (n, &t) => self.report_incorrect_semantics(
-                            "Expected `{` after while condition",
-                            Some(&t),
-                            n,
-                        ),
-                    };
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::StartBlock),
+                        "Expected `{` after while condition"
+                    );
                     let body = self.parse_scope();
                     push_to_statements(ASTStatement(
                         InASTStatement::While {
                             condition: ASTBox::new(cond),
                             body,
                         },
-                        while_place,
+                        place,
                     ));
                 }
-                (_, Token::Keyword(Keyword::EndBlock)) => {
+                Token::Keyword(Keyword::EndBlock) => {
                     self.eat();
                     return statements;
                 }
                 // Function call, or just expression
-                (place, &Token::Identifier(_)) => {
+                &Token::Identifier(_) => {
                     // parse the expression. e.g. f(x) + 42
                     let stat = ASTStatement(InASTStatement::EvalExpr(self.parse_expr()), place);
                     // should be semicolon after expression:
-                    match self.peek().unwrap() {
-                        (_, Token::Keyword(Keyword::EndStatement)) => {
-                            self.eat();
-                        }
-                        (start, &t) => {
-                            self.report_incorrect_semantics("must end statement!", Some(&t), start)
-                        }
-                    }
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::EndStatement),
+                        "must end statement!"
+                    );
                     push_to_statements(stat);
                 }
 
                 // return statement that returns from function with value
-                (place, Token::Keyword(Keyword::Return)) => {
+                Token::Keyword(Keyword::Return) => {
                     self.eat();
                     let what_to_return = self.parse_expr();
-                    match self.eat().unwrap() {
-                        (_, Token::Keyword(Keyword::EndStatement)) => (),
-                        (n, &t) => self.report_incorrect_semantics(
-                            "Expected `;` after return expression!",
-                            Some(&t),
-                            n,
-                        ),
-                    };
+                    eat_require!(
+                        self,
+                        Token::Keyword(Keyword::EndStatement),
+                        "Expected `;` after return expression"
+                    );
                     push_to_statements(ASTStatement(InASTStatement::Return(what_to_return), place));
                 }
-                (place, Token::Keyword(Keyword::StartBlock)) => {
+                Token::Keyword(Keyword::StartBlock) => {
                     self.eat();
                     let scope_body = self.parse_scope();
                     push_to_statements(ASTStatement(InASTStatement::Block(scope_body), place));
                 }
 
-                (n, &t) => self.report_incorrect_semantics(
+                &t => self.report_incorrect_semantics(
                     "Erroneous token to start statement with",
                     Some(&t),
-                    n,
+                    place,
                 ),
             };
         }
@@ -405,18 +387,19 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// should be called when the first `(` is eaten. Will eat the last `)`
     fn parse_function_call(&mut self) -> Vec<ASTExpr> {
         let mut arg_vec = Vec::new();
-        while match self.peek().unwrap() {
-            (_, Token::Keyword(Keyword::EndParen)) => false,
-            (_, Token::Keyword(Keyword::Comma)) => {
-                self.eat();
-                true
-            }
-            _ => true,
-            //  (n, &t) => self.report_incorrect_semantics("expected comma", &t, n),
-        } {
+        loop {
             // eat all arguments
             let arg = self.parse_expr();
             arg_vec.push(arg);
+
+            match self.peek().unwrap() {
+                (_, Token::Keyword(Keyword::EndParen)) => {
+                    break;
+                }
+                (_, Token::Keyword(Keyword::Comma)) => (),
+                (n, &t) => self.report_incorrect_semantics("expected comma", Some(&t), n),
+            }
+            self.eat(); // eat comma
         }
         self.eat(); // eat end paren
         arg_vec
@@ -491,7 +474,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
 
 pub fn print_ast(body: &ASTBody) {
     fn print_indent(indent: u64) {
-        for _ in 0..(indent * 2) {
+        for _ in 0..indent * 2 {
             print!(" ");
         }
     }

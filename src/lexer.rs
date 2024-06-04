@@ -144,12 +144,12 @@ impl<'a> Lexer<'a> {
         std::process::exit(1);
     }
 
-    fn peek(&mut self) -> Option<(usize, char)> {
-        self.chars.peek().copied()
+    fn peek(&mut self) -> (usize, char) {
+        self.chars.peek().copied().unwrap()
     }
 
-    fn eat(&mut self) -> Option<(usize, char)> {
-        self.chars.next()
+    fn eat(&mut self) -> (usize, char) {
+        self.chars.next().unwrap()
     }
 
     fn add_token(&mut self, token: Token, start_char_idx: usize, end_char_idx: usize) {
@@ -173,52 +173,43 @@ impl<'a> Lexer<'a> {
 
     fn lex(&mut self) {
         loop {
-            match match self.peek() {
-                Some((_, ch)) => {
-                    println!("char {}", ch);
-                    ch
-                }
+            let (start_idx, ch) = match self.chars.next() {
+                Some(v) => v,
                 None => break,
-            } {
-                // # comment
+            };
+            println!("char {}", ch);
+            match ch {
                 COMMENT_PREFIX => {
-                    // don't care until newline
-                    while self.peek().unwrap().1 != '\n' {
+                    while self.peek().1 != '\n' {
                         self.eat();
                     }
                     self.eat(); // eat newline
                 }
                 // ignore whitespace
-                ch if ch.is_whitespace() => {
-                    self.eat();
-                }
-                // parse string
+                _ if ch.is_whitespace() => (),
                 STRING_DELIMITER => {
-                    // string
-                    let (idx, _) = self.eat().unwrap();
-                    while self.peek().unwrap().1 != STRING_DELIMITER {
+                    while self.peek().1 != STRING_DELIMITER {
                         self.eat();
                     }
-                    let (end_idx, _) = self.eat().unwrap(); // eat the end string delimiter
-                    let the_str = &self.source[(idx + 1)..end_idx];
-                    self.add_token(Token::String(the_str), idx, end_idx);
+                    let (end_idx, _) = self.eat(); // eat the end string delimiter
+                    let the_str = &self.source[(start_idx + 1)..end_idx];
+                    self.add_token(Token::String(the_str), start_idx, end_idx);
                 }
                 // parse number
-                ch if ch.is_numeric() => {
-                    let (start_idx, _) = self.eat().unwrap();
-                    while self.peek().unwrap().1.is_numeric() {
+                _ if ch.is_numeric() => {
+                    while self.peek().1.is_numeric() {
                         self.eat();
                     }
 
-                    let &(mut end_idx, mut after_char) = self.chars.peek().unwrap();
+                    let (mut end_idx, mut after_char) = self.peek();
 
                     if after_char == '.' {
                         // floating point number
                         self.eat();
-                        while self.peek().unwrap().1.is_numeric() {
+                        while self.peek().1.is_numeric() {
                             self.eat();
                         }
-                        let &(another_end_idx, another_after_char) = self.chars.peek().unwrap();
+                        let (another_end_idx, another_after_char) = self.peek();
                         end_idx = another_end_idx;
                         after_char = another_after_char;
                     }
@@ -230,7 +221,6 @@ impl<'a> Lexer<'a> {
                             end_idx,
                         );
                     }
-
                     // TODO turn into floating point token if floating point
 
                     let num_str = &self.source[start_idx..end_idx];
@@ -239,26 +229,24 @@ impl<'a> Lexer<'a> {
                 }
 
                 // special characters like {}(),; that can be repeated without whitespace
-                ch if self.single_char_repeatables.contains_key(&ch) => {
+                _ if self.single_char_repeatables.contains_key(&ch) => {
                     // special characters that can be repeated without whitespace
-                    let (idx, _) = self.eat().unwrap();
                     self.add_token(
                         Token::Keyword(*self.single_char_repeatables.get(&ch).unwrap()),
-                        idx,
-                        idx + 1,
+                        start_idx,
+                        start_idx + 1,
                     );
                 }
                 // special math operators that can have names after them
-                ch if self.math_chars.contains(&ch) => {
+                _ if self.math_chars.contains(&ch) => {
                     // keywords of lang
-                    let (start_idx, _) = self.eat().unwrap();
                     while {
-                        let chh = self.peek().unwrap().1;
+                        let chh = self.peek().1;
                         self.math_chars.contains(&chh)
                     } {
                         self.eat();
                     }
-                    let (end_idx, _) = self.peek().unwrap();
+                    let (end_idx, _) = self.peek();
                     let keyword_str = &self.source[start_idx..end_idx];
                     match self.mathy_keywords.get(keyword_str) {
                         Some(&kw) => self.add_token(Token::Keyword(kw), start_idx, end_idx),
@@ -272,17 +260,15 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 // identifier or keyword
-                ch if ch.is_alphabetic() => {
+                _ if ch.is_alphabetic() => {
                     // Can either be a keyword or a variable name or a function name
-                    let (start_idx, _) = self.eat().unwrap();
-
                     while {
-                        let c = self.peek().unwrap().1;
+                        let c = self.peek().1;
                         is_identifier_char(c)
                     } {
                         self.eat();
                     }
-                    let (end_idx, _) = self.peek().unwrap();
+                    let (end_idx, _) = self.peek();
 
                     // check if it is a keyword
                     let name_str = &self.source[start_idx..end_idx];
@@ -297,7 +283,7 @@ impl<'a> Lexer<'a> {
                     }
                 }
                 // other characters
-                ch => {
+                _ => {
                     panic!("unrecognized character: {}", ch);
                 }
             }

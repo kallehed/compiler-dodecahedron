@@ -94,18 +94,34 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                         self.print_load("rax", place);
                         self.println("ret");
                     }
-                    InASTStatement::If { condition, body } => {
-                        let if_end_label = self.get_tmp_label();
-                        let if_end_label_name = self.tmp_label_to_asm_name(if_end_label);
-                        // do condition
+                    InASTStatement::If {
+                        condition,
+                        if_true_body,
+                        if_false_body,
+                    } => {
+                        let label_else = self.get_tmp_label();
+                        let label_else_name = self.tmp_label_to_asm_name(label_else);
+                        let label_end = self.get_tmp_label();
+                        let label_end_name = self.tmp_label_to_asm_name(label_end);
+
+                        //           Compute conditional
                         let cond_place = self.expr_to_asm(condition, vars, tmp_place);
                         self.print_load("rax", cond_place);
+                        //           jump to ELSE if 0
                         self.println("cmp rax, 0");
-                        self.println(&format!("je {}", if_end_label_name)); // jump if 0
+                        self.println(&format!("je {}", label_else_name)); // jump if 0
 
-                        // NOW: output if block, and then end label
-                        self.body_to_asm(body, vars, tmp_place);
-                        self.print_label(&if_end_label_name);
+                        //           "true code"
+                        self.body_to_asm(if_true_body, vars, tmp_place);
+                        //       jump to END
+                        self.println(&format!("jmp {}", label_end_name));
+
+                        //           label: ELSE
+                        self.print_label(&label_else_name);
+                        //       "false code"
+                        self.body_to_asm(if_false_body, vars, tmp_place);
+                        //       label: END
+                        self.print_label(&label_end_name);
                     }
                     InASTStatement::While { condition, body } => {
                         let while_begin_label = self.get_tmp_label();

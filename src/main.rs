@@ -13,9 +13,11 @@ fn main() {
     println!("Hello, world!");
 
     // default name
+
     let mut file_name = "code.dode";
 
     // TODO: make compiler handle verbose flag
+
     // skip first, which just says name of compiler binary
 
     for arg in std::env::args().skip(1) {
@@ -121,6 +123,7 @@ pub enum Keyword {
     /// let
     CreateVar,
     If,
+    Else,
     While,
     /// return 3;
     Return,

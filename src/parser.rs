@@ -49,13 +49,12 @@ pub enum InASTExpr {
 #[derive(Debug)]
 pub struct ASTStatement(pub InASTStatement, pub usize);
 
-/// TODO fix so some exprs are not boxed? Seems like that could be done. Don't know why they are
-/// boxed
 #[derive(Debug)]
 pub enum InASTStatement {
     If {
         condition: ASTExpr,
-        body: ASTBody,
+        if_true_body: ASTBody,
+        if_false_body: ASTBody,
     },
     While {
         condition: ASTBox<ASTExpr>,
@@ -108,6 +107,7 @@ pub fn parse(
 
     (ast, parser.functions)
 }
+/// takes self, pattern and error message
 macro_rules! eat_require {
     ($self:ident, $the_pattern:pat, $msg:literal) => {
         match { $self.eat().unwrap() } {
@@ -116,6 +116,7 @@ macro_rules! eat_require {
         }
     };
 }
+/// takes self, pattern and error message
 macro_rules! eat_require_get {
     ($self:ident, $the_pattern:path, $msg:literal) => {
         match $self.eat().unwrap() {
@@ -130,8 +131,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         self.tokens.next()
     }
 
-    fn peek(&mut self) -> Option<(usize, &Token)> {
-        self.tokens.peek().copied()
+    fn peek(&mut self) -> (usize, &Token) {
+        self.tokens.peek().copied().unwrap()
     }
 
     fn report_incorrect_semantics(
@@ -155,9 +156,21 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         std::process::exit(1);
     }
 
+    /// parses scope that has to start with { brace
+    fn parse_scope_require_start_brace(&mut self) -> ASTBody {
+        // must be { after this
+        eat_require!(
+            self,
+            Token::Keyword(Keyword::StartBlock),
+            "Expected `{` at start of scope"
+        );
+        self.parse_scope()
+    }
+
     /// Parse generalized tokens. Probably statements.
     /// Variable name => Set it to expression
     /// If => generate If node
+    /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
     fn parse_scope(&mut self) -> ASTBody {
         let mut statements = ASTBody::new();
 
@@ -167,7 +180,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         };
 
         loop {
-            let (place, &token) = match self.peek() {
+            let &(place, &token) = match self.tokens.peek() {
                 Some(tok) => tok,
                 None => break,
             };
@@ -221,19 +234,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             ),
                         };
                     }
-                    // must be { after this
-                    eat_require!(
-                        self,
-                        Token::Keyword(Keyword::StartBlock),
-                        "Expected `{` after function declaration"
-                    );
                     self.functions.insert(func_name, arg_vec.len() as _);
 
                     push_to_statements(ASTStatement(
                         InASTStatement::Function {
                             name: func_name,
                             args: arg_vec,
-                            body: self.parse_scope(),
+                            body: self.parse_scope_require_start_brace(),
                         },
                         place,
                     ));
@@ -278,30 +285,31 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 Token::Keyword(Keyword::If) => {
                     self.eat();
                     let cond = self.parse_expr();
-                    eat_require!(
-                        self,
-                        Token::Keyword(Keyword::StartBlock),
-                        "Expected `{` after if condition"
-                    );
-                    let body = self.parse_scope();
-                    push_to_statements(ASTStatement(
-                        InASTStatement::If {
+                    let if_body = self.parse_scope_require_start_brace();
+                    // possible Else part
+                    let stat = match self.peek().1 {
+                        Token::Keyword(Keyword::Else) => {
+                            self.eat();
+                            let else_body = self.parse_scope_require_start_brace();
+                            InASTStatement::If {
+                                condition: cond,
+                                if_true_body: if_body,
+                                if_false_body: else_body,
+                            }
+                        }
+                        _ => InASTStatement::If {
                             condition: cond,
-                            body,
+                            if_true_body: if_body,
+                            if_false_body: vec![],
                         },
-                        place,
-                    ));
+                    };
+                    push_to_statements(ASTStatement(stat, place));
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     let cond = self.parse_expr();
-                    eat_require!(
-                        self,
-                        Token::Keyword(Keyword::StartBlock),
-                        "Expected `{` after while condition"
-                    );
-                    let body = self.parse_scope();
+                    let body = self.parse_scope_require_start_brace();
                     push_to_statements(ASTStatement(
                         InASTStatement::While {
                             condition: ASTBox::new(cond),
@@ -339,8 +347,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     push_to_statements(ASTStatement(InASTStatement::Return(what_to_return), place));
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.eat();
-                    let scope_body = self.parse_scope();
+                    let scope_body = self.parse_scope_require_start_brace();
                     push_to_statements(ASTStatement(InASTStatement::Block(scope_body), place));
                 }
 
@@ -369,7 +376,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             }
             &Token::Identifier(e) => {
                 // can either be a variable or a function call
-                match self.peek().unwrap() {
+                match self.peek() {
                     (_, Token::Keyword(Keyword::StartParen)) => {
                         self.eat(); // eat start paren
                         InASTExpr::FunctionCall(e, self.parse_function_call())
@@ -392,7 +399,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             let arg = self.parse_expr();
             arg_vec.push(arg);
 
-            match self.peek().unwrap() {
+            match self.peek() {
                 (_, Token::Keyword(Keyword::EndParen)) => {
                     break;
                 }
@@ -442,7 +449,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// DOES NOT EAT TOKEN
     /// if ` ; ) } ` ... returns None
     fn parse_oper(&mut self) -> (BinaryOp, BinOpPrecedence, usize) {
-        let (res_place, &res_token) = self.peek().unwrap();
+        let (res_place, &res_token) = self.peek();
         use Token::Keyword as T;
         let op: BinaryOp = match res_token {
             T(Keyword::Plus) => BinaryOp::Add,

@@ -48,6 +48,7 @@ pub fn generate_tokens(
             let mut map = HashMap::new();
             map.insert("let", Keyword::CreateVar);
             map.insert("if", Keyword::If);
+            map.insert("else", Keyword::Else);
             map.insert("while", Keyword::While);
             map.insert("fn", Keyword::FunctionIncoming);
             map.insert("return", Keyword::Return);

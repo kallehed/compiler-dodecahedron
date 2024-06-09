@@ -8,6 +8,13 @@ fn main() {
         print_int(a + b + c);
     }
 
+    if 0 {
+        print_int(69);
+    } else {
+        print_int(420);
+    }
+
+
 
     fibb(1000000, 0, 1);
     print_zeroes(5);

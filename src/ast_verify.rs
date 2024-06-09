@@ -46,7 +46,11 @@ pub fn run<'a>(
             let mut vars_in_scope = Vec::new();
             for stat in body {
                 match &mut stat.0 {
-                    InASTStatement::If { condition, body } => {
+                    InASTStatement::If {
+                        condition,
+                        if_true_body,
+                        if_false_body,
+                    } => {
                         match self.type_check_expr(condition) {
                             Type::Int => {} // condition has to be Int
                             other => {
@@ -57,7 +61,8 @@ pub fn run<'a>(
                                 );
                             }
                         }
-                        self.type_check_scope(body);
+                        self.type_check_scope(if_true_body);
+                        self.type_check_scope(if_false_body);
                     }
                     InASTStatement::While { condition, body } => {
                         match self.type_check_expr(condition) {

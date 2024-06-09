@@ -70,11 +70,17 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
         fn body_to_c(&mut self, body: &ASTBody) {
             for stat in body {
                 match &stat.0 {
-                    InASTStatement::If { condition, body } => {
+                    InASTStatement::If {
+                        condition,
+                        if_true_body,
+                        if_false_body,
+                    } => {
                         self.print("if (");
                         self.expr_to_c(condition);
                         self.print("){");
-                        self.body_to_c(body);
+                        self.body_to_c(if_true_body);
+                        self.print("}else{");
+                        self.body_to_c(if_false_body);
                         self.print("}");
                     }
                     InASTStatement::While { condition, body } => {

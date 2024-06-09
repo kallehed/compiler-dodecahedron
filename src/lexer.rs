@@ -153,7 +153,8 @@ impl<'a> Lexer<'a> {
         self.chars.next().unwrap()
     }
 
-    fn add_token(&mut self, token: Token, start_char_idx: usize, end_char_idx: usize) {
+    /// add new token
+    fn push(&mut self, token: Token, start_char_idx: usize, end_char_idx: usize) {
         println!("add token: {:?}", token);
         self.tokens.push(token);
         self.token_idx_to_char_range
@@ -169,7 +170,7 @@ impl<'a> Lexer<'a> {
                 idx
             }
         };
-        self.add_token(Token::Identifier(idx), start_char_idx, end_char_idx);
+        self.push(Token::Identifier(idx), start_char_idx, end_char_idx);
     }
 
     fn lex(&mut self) {
@@ -194,7 +195,7 @@ impl<'a> Lexer<'a> {
                     }
                     let (end_idx, _) = self.eat(); // eat the end string delimiter
                     let the_str = &self.source[(start_idx + 1)..end_idx];
-                    self.add_token(Token::String(the_str), start_idx, end_idx);
+                    self.push(Token::String(the_str), start_idx, end_idx);
                 }
                 // parse number
                 _ if ch.is_numeric() => {
@@ -226,13 +227,13 @@ impl<'a> Lexer<'a> {
 
                     let num_str = &self.source[start_idx..end_idx];
                     let num = num_str.parse::<_>().unwrap();
-                    self.add_token(Token::Int(num), start_idx, end_idx);
+                    self.push(Token::Int(num), start_idx, end_idx);
                 }
 
                 // special characters like {}(),; that can be repeated without whitespace
                 _ if self.single_char_repeatables.contains_key(&ch) => {
                     // special characters that can be repeated without whitespace
-                    self.add_token(
+                    self.push(
                         Token::Keyword(*self.single_char_repeatables.get(&ch).unwrap()),
                         start_idx,
                         start_idx + 1,
@@ -250,7 +251,7 @@ impl<'a> Lexer<'a> {
                     let (end_idx, _) = self.peek();
                     let keyword_str = &self.source[start_idx..end_idx];
                     match self.mathy_keywords.get(keyword_str) {
-                        Some(&kw) => self.add_token(Token::Keyword(kw), start_idx, end_idx),
+                        Some(&kw) => self.push(Token::Keyword(kw), start_idx, end_idx),
                         None => {
                             self.report_incorrect_syntax(
                                 &format!("Invalid operator keyword: `{}`", keyword_str),
@@ -274,9 +275,7 @@ impl<'a> Lexer<'a> {
                     // check if it is a keyword
                     let name_str = &self.source[start_idx..end_idx];
                     match self.str_to_keyword.get(name_str) {
-                        Some(&keyword) => {
-                            self.add_token(Token::Keyword(keyword), start_idx, end_idx)
-                        }
+                        Some(&keyword) => self.push(Token::Keyword(keyword), start_idx, end_idx),
                         None => {
                             // not a keyword, must be a identifier (variable or function name)
                             self.add_identifier(name_str, start_idx, end_idx);

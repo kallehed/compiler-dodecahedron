@@ -161,41 +161,30 @@ pub fn run<'a>(
             match &mut expr.0 {
                 InASTExpr::Int(_) => Type::Int, // int is probably correct
                 InASTExpr::VarName(name) => {
-                    // varname must exist to be used!
                     if !self.current_vars.contains(name) {
-                        // ERROR: tried to reference nonexistent variable
                         self.report_error_on_token_idx("Variable has not been declared!", expr.1);
                     }
                     Type::Int // variable exists, and all variables are Int
                 }
-                InASTExpr::FunctionCall(name, args) =>
-                // make sure that function is called with correct number of arguments.
-                {
+                InASTExpr::FunctionCall(name, args) => {
                     // function exists, and called with right number of arguments
-                    match self.functions.get(name) {
-                        Some(&nr_of_args) => {
-                            if args.len() != nr_of_args as _ {
-                                self.report_error_on_token_idx(
-                                    &format!(
-                                        "Function `{}` called with {} argument(s), but it needs {}",
-                                        &self.ident_to_name[*name as usize],
-                                        args.len(),
-                                        nr_of_args
-                                    ),
-                                    expr.1,
-                                )
+                    let str_name = self.ident_to_name[*name as usize];
+                    if let Some(msg) = match self.functions.get(name) {
+                        Some(&nr_args) => {
+                            if args.len() != nr_args as _ {
+                                Some(format!(
+                                    "Function `{}` called with {} argument(s), but needs {}",
+                                    str_name,
+                                    args.len(),
+                                    nr_args
+                                ))
+                            } else {
+                                None
                             }
                         }
-                        None => {
-                            // function literally doesn't exist, why are you trying to call a nonexistent function?
-                            self.report_error_on_token_idx(
-                                &format!(
-                                    "Tried to call function `{}` which doesn't exist",
-                                    &self.ident_to_name[*name as usize]
-                                ),
-                                expr.1,
-                            );
-                        }
+                        None => Some(format!("Tried to call nonexistant function `{}`", str_name)),
+                    } {
+                        self.report_error_on_token_idx(&msg, expr.1);
                     }
                     // check correctness of arguments
                     for arg in args {
@@ -247,7 +236,7 @@ pub fn run<'a>(
                         | BinaryOp::Multiply) => {
                             let left_type = self.type_check_expr(left);
                             let right_type = self.type_check_expr(right);
-                            if left_type != right_type {
+                            if left_type != right_type || left_type != Type::Int {
                                 // TODO: print types without debug print
                                 self.report_error_on_token_idx(&format!("Binary operator `{:?}` received incompatible types: `{:?}`, and: `{:?}`!", op, left_type, right_type), expr.1);
                             }
@@ -275,7 +264,6 @@ pub fn run<'a>(
                                 }
                                 _ => {}
                             }
-
                             Type::Int
                         }
                     }

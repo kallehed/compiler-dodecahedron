@@ -110,7 +110,7 @@ pub fn parse(
 /// takes self, pattern and error message
 macro_rules! eat_require {
     ($self:ident, $the_pattern:pat, $msg:literal) => {
-        match { $self.eat().unwrap() } {
+        match { $self.eat() } {
             (n, $the_pattern) => n,
             (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
         }
@@ -119,7 +119,7 @@ macro_rules! eat_require {
 /// takes self, pattern and error message
 macro_rules! eat_require_get {
     ($self:ident, $the_pattern:path, $msg:literal) => {
-        match $self.eat().unwrap() {
+        match $self.eat() {
             (n, &$the_pattern(a)) => (n, a),
             (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
         }
@@ -127,8 +127,8 @@ macro_rules! eat_require_get {
 }
 
 impl<'parser_lifetime> Parser<'parser_lifetime> {
-    fn eat(&mut self) -> Option<(usize, &Token)> {
-        self.tokens.next()
+    fn eat(&mut self) -> (usize, &Token) {
+        self.tokens.next().unwrap()
     }
 
     fn peek(&mut self) -> (usize, &Token) {
@@ -213,7 +213,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut arg_vec = Vec::new();
                     loop {
-                        let arg_name = match self.eat().unwrap() {
+                        let arg_name = match self.eat() {
                             (_, &Token::Identifier(arg_name)) => arg_name,
                             (_, Token::Keyword(Keyword::EndParen)) => break,
                             (tok_nr, &tok) => self.report_incorrect_semantics(
@@ -224,7 +224,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                         arg_vec.push(arg_name);
                         // Next should be a comma or end paren
-                        match self.eat().unwrap() {
+                        match self.eat() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
                             (_, Token::Keyword(Keyword::EndParen)) => break,
                             (n, &t) => self.report_incorrect_semantics(
@@ -361,20 +361,20 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         statements
     }
     fn parse_primary(&mut self) -> ASTExpr {
-        let (place, token) = self.eat().unwrap();
+        let (p, &token) = self.eat();
         let in_astexpr = match token {
-            &Token::String(_) => self.report_incorrect_semantics(
+            Token::String(_) => self.report_incorrect_semantics(
                 "Strings not allowed in language currently!",
                 None,
-                place,
+                p,
             ),
-            &Token::Int(v) => InASTExpr::Int(v),
+            Token::Int(v) => InASTExpr::Int(v),
             Token::Keyword(Keyword::StartParen) => {
                 let inner_expr = self.parse_expr();
                 self.eat(); // eat the end parenthesis
                 return inner_expr; // forget about paren token place
             }
-            &Token::Identifier(e) => {
+            Token::Identifier(e) => {
                 // can either be a variable or a function call
                 match self.peek() {
                     (_, Token::Keyword(Keyword::StartParen)) => {
@@ -384,11 +384,11 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     _ => InASTExpr::VarName(e),
                 }
             }
-            &t @ Token::Keyword(_) => {
-                self.report_incorrect_semantics("no keywords as primary in expr", Some(&t), place)
+            t @ Token::Keyword(_) => {
+                self.report_incorrect_semantics("no keywords as primary in expr", Some(&t), p)
             }
         };
-        ASTExpr(in_astexpr, place)
+        ASTExpr(in_astexpr, p)
     }
 
     /// should be called when the first `(` is eaten. Will eat the last `)`

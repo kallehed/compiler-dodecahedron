@@ -216,12 +216,12 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                                 _ => panic!("left hand side MUST be lvalue"),
                             }
                         }
-                        op @ (BinaryOp::Multiply
+                        op @ (BinaryOp::Mul
                         | BinaryOp::Add
                         | BinaryOp::Sub
-                        | BinaryOp::Equals
-                        | BinaryOp::Less
-                        | BinaryOp::Greater) => {
+                        | BinaryOp::Eql
+                        | BinaryOp::Les
+                        | BinaryOp::Mor) => {
                             // have to load both into memory first, as they will rewrite registers
                             let left_place = self.expr_to_asm(left, vars, tmp_place);
                             let right_place = self.expr_to_asm(
@@ -238,20 +238,20 @@ pub fn to_asm(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                             self.print_load("rbx", right_place);
 
                             match op {
-                                BinaryOp::Multiply => self.println("imul rax, rbx"),
+                                BinaryOp::Mul => self.println("imul rax, rbx"),
                                 BinaryOp::Add => self.println("add rax, rbx"),
                                 BinaryOp::Sub => self.println("sub rax, rbx"),
-                                BinaryOp::Equals => {
+                                BinaryOp::Eql => {
                                     self.println("cmp rax, rbx");
                                     self.println("sete al"); // set lowest byte of rax to 1 if equal
                                     self.println("movzx rax, al"); // zero extend to rax
                                 }
-                                BinaryOp::Less => {
+                                BinaryOp::Les => {
                                     self.println("cmp rax, rbx");
                                     self.println("setl al"); // set lowest byte of rax to 1 if equal
                                     self.println("movzx rax, al"); // zero extend to rax
                                 }
-                                BinaryOp::Greater => {
+                                BinaryOp::Mor => {
                                     self.println("cmp rax, rbx");
                                     self.println("setg al"); // set lowest byte of rax to 1 if equal
                                     self.println("movzx rax, al"); // zero extend to rax

@@ -75,7 +75,8 @@ fn main() {
 
     println!("\n--- Type check AST: \n");
     ast_verify::run(
-        &mut ast,
+        &mut sokens,
+        &origins,
         &ident_idx_to_string,
         &functions,
         source,

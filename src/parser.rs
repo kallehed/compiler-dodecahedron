@@ -14,12 +14,12 @@ pub enum BinaryOp {
     SetAdd = 1,
     SetSub = 2,
     Set = 3,
-    Equals = 4,
-    Less = 5,
-    Greater = 6,
+    Eql = 4,
+    Les = 5,
+    Mor = 6,
     Add = 7,
     Sub = 8,
-    Multiply = 9,
+    Mul = 9,
 }
 
 impl BinaryOp {
@@ -42,7 +42,11 @@ impl BinaryOp {
 }
 /// Semantic Token
 #[derive(Debug, Copy, Clone)]
-enum Soken {
+pub enum Soken {
+    /// used in ast verifyer to delete Soken's in constant propogation. Should not be used or referenced otherwise
+    /// can be ignored in this file anyway
+    Nil,
+
     /// one
     Return,
     /// standalone
@@ -170,14 +174,16 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
 
     /// parses scope that has to start with { brace, eats last }
     /// outputs { and } sokens
-    fn parse_scope_require_start_brace(&mut self) {
+    fn parse_scope_require_start_brace(&mut self, add_scope_start_soken: bool) {
         // must be { after this
         let p = eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
             "Expected `{` at start of scope"
         );
-        self.push(Soken::ScopeStart, p);
+        if add_scope_start_soken {
+            self.push(Soken::ScopeStart, p);
+        }
 
         self.parse_scope();
 
@@ -253,8 +259,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     }
                     self.functions.insert(func_name, args);
                     self.push(Soken::FuncDef(func_name, args), place);
-
-                    self.parse_scope_require_start_brace();
+                    self.parse_scope_require_start_brace(false);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
@@ -276,24 +281,15 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.eat();
                     self.parse_expr();
                     self.push(Soken::If, place);
-                    self.parse_scope_require_start_brace();
-                    // possible Else part
-                    match self.peek().1 {
-                        Token::Keyword(Keyword::Else) => {
-                            self.eat();
-                            self.parse_scope_require_start_brace();
-                        }
-                        _ => panic!("please add Else after if statemnt TODO remove this"),
-                    };
+                    self.parse_scope_require_start_brace(false);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
                     self.push(Soken::While, place);
-                    self.parse_scope_require_start_brace();
+                    self.parse_scope_require_start_brace(false);
                 }
-
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
                     self.eat(); // eat return token
@@ -306,7 +302,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     );
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.parse_scope_require_start_brace(); // notice no eating!
+                    self.parse_scope_require_start_brace(true); // notice no eating!
                 }
                 Token::Keyword(Keyword::EndBlock) => {
                     return; // should be return? Idk, maybe break
@@ -434,10 +430,10 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         let prec = match res_token {
             T(K::Plus) => B::Add.prec(),
             T(K::Minus) => B::Sub.prec(),
-            T(K::Multiply) => B::Multiply.prec(),
-            T(K::Less) => B::Less.prec(),
-            T(K::More) => B::Greater.prec(),
-            T(K::Equals) => B::Equals.prec(),
+            T(K::Multiply) => B::Mul.prec(),
+            T(K::Less) => B::Les.prec(),
+            T(K::More) => B::Mor.prec(),
+            T(K::Equals) => B::Eql.prec(),
             T(K::Set(SetType::Add)) => B::SetAdd.prec(),
             T(K::Set(SetType::Sub)) => B::SetSub.prec(),
             T(K::Set(SetType::Set)) => B::Set.prec(),

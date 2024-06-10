@@ -45,6 +45,11 @@ thought - let everything collapse right into operators like shunting yard algori
 ex: [1][2][+] -> [3]
 or: [2][3][*][1][+] -> [7]
 
+FUNCTION_CALL: (later could remove that calls hold nr of arguments, could be implicit)
+f(1,2)
+ -> [1] [2] [call f 2args]
+ FORM: [ARG]... [CALL FUNC X_ARGS]
+
 CREATE_VAR:
 let a = 2;
  ->  [crtvar a] [a][2][=]           two statements
@@ -57,23 +62,23 @@ FORM: [{] [STAT]... [}]
 
 RETURN:
 return 1+2*3;
-->   [2][3][*][1][+][ret]       one statment
+->   [2][3][*][1][+][ret]       one statement
 FORM: [Int] [RETURN]
 
 WHILE:
 while 1 {g(2);}
-->  [1] [while] [{] [2] [call g 1arg] [}]
-FORM: [CONDEXPR] [WHILE] [{] [EXPR] [}]
+->  [1] [while] [2] [call g 1arg] [}]
+FORM: [CONDEXPR] [WHILE] [EXPR] [}]
 
 IF:
-if 420 {return 2;} else {return 3;}
-->    [420] [if] [{] [2] [ret] [}] [{] [3] [ret] [}]
-FORM: [COND] [IF] [{] [TRUE_STATEMENTS] [}] [{] [FALSE_STATEMENTS] [}]
+if 420 {return 2;}
+->    [420] [if] [2] [ret] [}]
+FORM: [COND] [IF] [TRUE_STATEMENTS] [}]
 
-FN_DEF:
+FN_DEF: (nr of args could be implicit)
 fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
--> [a] [b] [3] [ret] [def f 2arg ] [a] [b] [1] [2] [call f 2arg] [4] [ret] [def g 2arg]
-FORM: [ARG]... [FUNCNAME: NR_ARGS] [{] [STATEMENT] [}]
+-> [a] [b] [def f 2arg] [3] [ret] [}]  [a] [b] [def g 2arg] [1] [2] [call f 2arg] [4] [ret] [}]
+FORM: [ARG]... [FUNCNAME: NR_ARGS] [STATEMENT] [}]
 
 
 # Troubles:

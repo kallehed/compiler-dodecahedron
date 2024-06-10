@@ -40,12 +40,12 @@ pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
                 BinaryOp::SetAdd => "+=",
                 BinaryOp::SetSub => "-=",
                 BinaryOp::Set => "=",
-                BinaryOp::Equals => "==",
-                BinaryOp::Less => "<",
-                BinaryOp::Greater => ">",
+                BinaryOp::Eql => "==",
+                BinaryOp::Les => "<",
+                BinaryOp::Mor => ">",
                 BinaryOp::Add => "+",
                 BinaryOp::Sub => "-",
-                BinaryOp::Multiply => "*",
+                BinaryOp::Mul => "*",
             }
         }
 

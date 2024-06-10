@@ -2,12 +2,8 @@ use std::collections::HashMap;
 
 use crate::lexer::Token;
 use crate::IdentIdx;
-use crate::Int;
 use crate::Keyword;
 use crate::SetType;
-
-type ASTBox<T> = Box<T>;
-pub type ASTBody = Vec<ASTStatement>;
 
 /// Binary operators with precedence as integer representation
 /// IMPORTANT: WHEN ADDING NEW BINOPS: CHANGE THE "from_number" FUNCTION!
@@ -44,45 +40,8 @@ impl BinaryOp {
         self as _
     }
 }
-
-/// holds InAstExpr and token idx of expr
-#[derive(Debug)]
-pub struct ASTExpr(pub InASTExpr, pub usize);
-
-#[derive(Debug)]
-pub enum InASTExpr {
-    Int(Int),
-    VarName(IdentIdx),
-    FunctionCall(IdentIdx, Vec<ASTExpr>), // a function and its arguments
-    Binary(BinaryOp, ASTBox<ASTExpr>, ASTBox<ASTExpr>),
-}
-
-#[derive(Debug)]
-pub struct ASTStatement(pub InASTStatement, pub usize);
-
-#[derive(Debug)]
-pub enum InASTStatement {
-    If {
-        condition: ASTExpr,
-        if_true_body: ASTBody,
-        if_false_body: ASTBody,
-    },
-    While {
-        condition: ASTBox<ASTExpr>,
-        body: ASTBody,
-    },
-    EvalExpr(ASTExpr), // evaluating an expression: 1+f(2)
-    CreateVar(IdentIdx),
-    Function {
-        name: IdentIdx,
-        args: Vec<IdentIdx>, // names of args
-        body: ASTBody,
-    },
-    Return(ASTExpr),
-    /// {}
-    Block(ASTBody),
-}
 /// Semantic Token
+#[derive(Debug, Copy, Clone)]
 enum Soken {
     /// one
     Return,
@@ -105,6 +64,10 @@ enum Soken {
     If,
     /// expects two
     While,
+    /// {, standalone
+    ScopeStart,
+    /// }, standalone
+    ScopeEnd,
 }
 
 struct Parser<'parser_lifetime> {
@@ -131,7 +94,7 @@ pub fn parse(
     token_idx_to_char_range: &Vec<(usize, usize)>,
     source: &str,
     file_name: &str,
-) -> (ASTBody, HashMap<IdentIdx, u16>) {
+) -> (Vec<Soken>, Vec<usize>, HashMap<IdentIdx, u16>) {
     let mut token_iter = tokens.iter().enumerate().peekable();
     let mut parser = Parser {
         tokens: &mut token_iter,
@@ -144,9 +107,9 @@ pub fn parse(
         file_name,
     };
 
-    let ast = parser.parse_scope();
+    parser.parse_scope();
 
-    (ast, parser.functions)
+    (parser.sokens, parser.origins, parser.functions)
 }
 /// takes self, pattern and error message
 macro_rules! eat_require {
@@ -161,6 +124,14 @@ macro_rules! eat_require {
 macro_rules! eat_require_get {
     ($self:ident, $the_pattern:path, $msg:literal) => {
         match $self.eat() {
+            (n, &$the_pattern(a)) => (n, a),
+            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+        }
+    };
+}
+macro_rules! peek_require_get {
+    ($self:ident, $the_pattern:path, $msg:literal) => {
+        match $self.peek() {
             (n, &$the_pattern(a)) => (n, a),
             (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
         }
@@ -198,25 +169,31 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     }
 
     /// parses scope that has to start with { brace, eats last }
+    /// outputs { and } sokens
     fn parse_scope_require_start_brace(&mut self) {
         // must be { after this
-        eat_require!(
+        let p = eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
             "Expected `{` at start of scope"
         );
-        self.parse_scope()
+        self.push(Soken::ScopeStart, p);
+
+        self.parse_scope();
+
+        let p = eat_require!(
+            self,
+            Token::Keyword(Keyword::EndBlock),
+            "Expected `}` at end of scope"
+        );
+        self.push(Soken::ScopeEnd, p);
     }
 
-    /// Parse generalized tokens. Probably statements. Eats last }
-    /// Variable name => Set it to expression
-    /// If => generate If node
+    /// Parse generalized tokens. Probably statements. If finds }, doesn't eat. Also ends at end of tokens
+    /// Variable name => Set it to expression, If => generate If node
     /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
+    /// doesn't output any { or } sokens
     fn parse_scope(&mut self) {
-        let mut push_to_statements = |statement: ASTStatement| {
-            println!("got an AST: {:?}", statement);
-        };
-
         loop {
             let &(place, &token) = match self.tokens.peek() {
                 Some(tok) => tok,
@@ -251,18 +228,18 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut args = 0;
                     loop {
-                        let arg = self.eat();
-                        let arg_name = match *arg.1 {
+                        let (arg_place, &arg) = self.eat();
+                        let arg_name = match arg {
                             Token::Identifier(arg_name) => arg_name,
                             Token::Keyword(Keyword::EndParen) => break,
-                            _ => self.report_incorrect_semantics(
+                            arg => self.report_incorrect_semantics(
                                 "Expected argument name",
-                                Some(&arg.1),
-                                arg.0,
+                                Some(&arg),
+                                arg_place,
                             ),
                         };
                         args += 1;
-                        self.push(Soken::Var(arg_name), arg.0);
+                        self.push(Soken::Var(arg_name), arg_place);
                         // Next should be a comma or end paren
                         match self.eat() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
@@ -275,19 +252,17 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                     }
                     self.functions.insert(func_name, args);
+                    self.push(Soken::FuncDef(func_name, args), place);
 
                     self.parse_scope_require_start_brace();
-                    self.push(Soken::FuncDef(func_name, args), place);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
                 &Token::Keyword(Keyword::CreateVar) => {
                     self.eat();
-                    // Next token should be variable-name
-                    let after = self.peek();
-                    let at_end =
-                        eat_require_get!(self, Token::Identifier, "expected variable_name");
-                    self.push(Soken::CreateVar(at_end.1), at_end.0);
+                    // Next token should be variable-name, NOTICE PEEK
+                    let name = peek_require_get!(self, Token::Identifier, "expected variable_name");
+                    self.push(Soken::CreateVar(name.1), name.0);
                     // parse expression let (a = 1+2+3)
                     self.parse_expr(); // this outputs expr
                     eat_require!(
@@ -300,27 +275,23 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 Token::Keyword(Keyword::If) => {
                     self.eat();
                     self.parse_expr();
+                    self.push(Soken::If, place);
                     self.parse_scope_require_start_brace();
                     // possible Else part
-                    let stat = match self.peek().1 {
+                    match self.peek().1 {
                         Token::Keyword(Keyword::Else) => {
                             self.eat();
                             self.parse_scope_require_start_brace();
                         }
                         _ => panic!("please add Else after if statemnt TODO remove this"),
                     };
-                    self.push(Soken::If, place);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
-                    self.parse_scope_require_start_brace();
                     self.push(Soken::While, place);
-                }
-                Token::Keyword(Keyword::EndBlock) => {
-                    self.eat();
-                    return statements;
+                    self.parse_scope_require_start_brace();
                 }
 
                 // return statement that returns from function with value
@@ -335,8 +306,10 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     );
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    let scope_body = self.parse_scope_require_start_brace();
-                    push_to_statements(ASTStatement(InASTStatement::Block(scope_body), place));
+                    self.parse_scope_require_start_brace(); // notice no eating!
+                }
+                Token::Keyword(Keyword::EndBlock) => {
+                    return; // should be return? Idk, maybe break
                 }
 
                 // Function call, or just expression
@@ -357,7 +330,6 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 ),
             };
         }
-        statements
     }
     /// add new semantic token, which was found at place
     fn push(&mut self, soken: Soken, place: usize) {

@@ -24,6 +24,7 @@ Program correctness thoughts:
 TODO: Don't allow nested functions, right now: bad behaviour.
 
 # Notes on running things:
+run when change: `ls . src/* | entr cargo r`
 
 run program after c backend done:
     `gcc out.c && ./a.out`
@@ -51,31 +52,29 @@ FORM: [CREATE_VAR] [EXPR]
 
 SCOPES:
 a=2;{a=3;}
-[a][2][=] [a][3][=] [scope stmnts:1]
-FORM: [STAT]... [SCOPE: NR_STMNTS]
+[a][2][=] [{] [a][3][=] [}]
+FORM: [{] [STAT]... [}]
 
 RETURN:
 return 1+2*3;
 ->   [2][3][*][1][+][ret]       one statment
-FORM: [EXPR] [RETURN]
+FORM: [Int] [RETURN]
 
 WHILE:
 while 1 {g(2);}
-->  [1] [2] [call g 1arg] [while]
-FORM: [COND] [STATEMENT]... [WHILE]
+->  [1] [while] [{] [2] [call g 1arg] [}]
+FORM: [CONDEXPR] [WHILE] [{] [EXPR] [}]
+
+IF:
+if 420 {return 2;} else {return 3;}
+->    [420] [if] [{] [2] [ret] [}] [{] [3] [ret] [}]
+FORM: [COND] [IF] [{] [TRUE_STATEMENTS] [}] [{] [FALSE_STATEMENTS] [}]
 
 FN_DEF:
 fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
 -> [a] [b] [3] [ret] [def f 2arg ] [a] [b] [1] [2] [call f 2arg] [4] [ret] [def g 2arg]
-FORM: [ARG]... [STATEMENT]... [FUNCNAME: NR_ARGS]
+FORM: [ARG]... [FUNCNAME: NR_ARGS] [{] [STATEMENT] [}]
 
-IF:     (TO CHANGE)
-if 420 {return 2;} else {return 3;}
-->    [420] [2] [ret] [3] [ret] [if]
-    ->   [420] [ret 2] [ret 3] [if]
-      -> [if 420 then [ret 2] else [ret 3] ]
-      maybe ???
-FORM: [COND] [TRUE_STATEMENTS] [FALSE_STATEMENTS] [IF]
 
 # Troubles:
 On linux, when you run a program it is by default line buffered (input sent on \n),

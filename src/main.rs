@@ -57,7 +57,7 @@ fn main() {
     println!("tokens: {:?}", tokens);
 
     println!(" \n--- STARTING PARSING!");
-    let (mut ast, mut functions) =
+    let (mut sokens, origins, mut functions) =
         parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
 
     // add print_int function to identifiers and to ident_to_name thing.
@@ -71,7 +71,7 @@ fn main() {
         }
     }
 
-    println!("\n FINAL AST: {:?}", ast);
+    println!("\n FINAL AST: {:?}", sokens);
 
     println!("\n--- Type check AST: \n");
     ast_verify::run(
@@ -84,31 +84,31 @@ fn main() {
     );
 
     //ast_interpreter::run_ast(&ast);
+    /*{
+    let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
+
+    println!("\n--- Now printing C code: \n");
+    println!("{}", c_code);
+
     {
-        let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
-
-        println!("\n--- Now printing C code: \n");
-        println!("{}", c_code);
-
-        {
-            use std::io::Write;
-            let mut file = std::fs::File::create("out.c").unwrap();
-            file.write_all(c_code.as_bytes()).unwrap();
-        }
+        use std::io::Write;
+        let mut file = std::fs::File::create("out.c").unwrap();
+        file.write_all(c_code.as_bytes()).unwrap();
     }
+    }*/
 
     // generate assembly (NASM)
-    {
-        let asm = asm_backend::to_asm(&ast, &ident_idx_to_string);
-        println!("\n--- Now printing ASM: \n");
-        // println!("{}", asm);
+    /*{
+    let asm = asm_backend::to_asm(&ast, &ident_idx_to_string);
+    println!("\n--- Now printing ASM: \n");
+    // println!("{}", asm);
 
-        {
-            use std::io::Write;
-            let mut file = std::fs::File::create("out.asm").unwrap();
-            file.write_all(asm.as_bytes()).unwrap();
-        }
+    {
+        use std::io::Write;
+        let mut file = std::fs::File::create("out.asm").unwrap();
+        file.write_all(asm.as_bytes()).unwrap();
     }
+    }*/
 }
 
 const STRING_DELIMITER: char = '"';

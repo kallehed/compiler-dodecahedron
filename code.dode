@@ -13,7 +13,7 @@ fn main() {
     }
     fibb(1000000, 0, 1);
     print_zeroes(5);
-    #let x = 1 + (y = 3);
+    #let x = 1 + (x = 3);
 
     let b = 1;
     while b < 10 {

@@ -1,6 +1,6 @@
-mod asm_backend;
+// mod asm_backend;
 mod ast_verify;
-mod c_backend;
+//mod c_backend;
 mod lexer;
 mod parser;
 

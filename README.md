@@ -24,7 +24,7 @@ Program correctness thoughts:
 TODO: Don't allow nested functions, right now: bad behaviour.
 
 # Notes on running things:
-run when change: `ls . src/* | entr cargo r`
+run when change: `ls . src/* | entr -c cargo r`
 
 run program after c backend done:
     `gcc out.c && ./a.out`

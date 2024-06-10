@@ -85,7 +85,7 @@ pub fn run<'a>(
     impl State<'_> {
         /// add var, also send token index of soken of var
         fn add_var(&mut self, name: IdentIdx, orig: usize) {
-            if self.vars.insert(name) {
+            if !self.vars.insert(name) {
                 self.report_error_on_token_idx("Variable has already been declared!", orig);
             }
             // if global scope contains it, this can't (can't assert bc Vector::push)
@@ -150,15 +150,9 @@ pub fn run<'a>(
                         self.scopes.last_mut().unwrap().returns = true;
                     }
                     Soken::Int(e) => self.spush(StackItem::Int(e), i),
-                    Soken::Var(e) => {
-                        if !self.vars.contains(&e) {
-                            self.report_error_on_token_idx(
-                                "Variable used before declaration",
-                                orig,
-                            );
-                        }
-                        self.spush(StackItem::Var(e), i);
-                    }
+                    // lazy checking for if variable is declared in binop -> bc parsing function declaration
+                    Soken::Var(e) => self.spush(StackItem::Var(e), i),
+
                     Soken::CreateVar(name) => self.add_var(name, orig),
                     // basically just create arg variables, then scope will be handled automatically
                     // TODO: maybe store name ident in scope so we can print it later if function doesn't return?
@@ -179,6 +173,18 @@ pub fn run<'a>(
                         // self.sexpect(2, "binop needs two values");
                         let (r, r_p) = self.spop();
                         let (l, l_p) = self.spop();
+                        fn check_declared(s: &mut State, it: &StackItem, orig: usize) {
+                            if let StackItem::Var(e) = it {
+                                if !s.vars.contains(&e) {
+                                    s.report_error_on_token_idx(
+                                        "Variable used before declaration",
+                                        orig,
+                                    );
+                                }
+                            }
+                        }
+                        check_declared(self, &l, self.origins[l_p]);
+                        check_declared(self, &r, self.origins[r_p]);
                         use BinaryOp as B;
                         match binop {
                             B::SetAdd | B::SetSub | B::Set => {

@@ -55,6 +55,11 @@ let a = 2;
  ->  [crtvar a] [a][2][=]           two statements
 FORM: [CREATE_VAR] [EXPR]
 
+SEMICOLON:
+1+2;
+ -> [1][2][+][;]
+FORM: [ENDSTAT]
+
 SCOPES:
 a=2;{a=3;}
 [a][2][=] [{] [a][3][=] [}]
@@ -77,8 +82,9 @@ FORM: [COND] [IF] [TRUE_STATEMENTS] [}]
 
 FN_DEF: (nr of args could be implicit)
 fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
--> [a] [b] [def f 2arg] [3] [ret] [}]  [a] [b] [def g 2arg] [1] [2] [call f 2arg] [4] [ret] [}]
-FORM: [ARG]... [FUNCNAME: NR_ARGS] [STATEMENT] [}]
+->  [def f 2arg] [a] [b] [3] [ret] [}]  [a] [b] [def g 2arg] [1] [2] [call f 2arg] [4] [ret] [}]
+FORM:  [FUNC_IDENT] [ARG]... [STATEMENT] [}]
+(get nbr of args from hashmap)
 
 
 # Troubles:

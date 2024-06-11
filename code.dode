@@ -11,18 +11,21 @@ fn main() {
     if 0 {
         print_int(69);
     }
+    fibb(x,x,x);
+
     fibb(1000000, 0, 1);
     print_zeroes(5);
     #let x = 1 + (x = 3);
+    let x = 69;
 
     let b = 1;
     while b < 10 {
         print_int(factorial(b));
         b += 1;
     }
+    return 69;
     print_zeroes(3);
 
-    return 0;
 }
 
 fn non_returning() {

@@ -46,6 +46,8 @@ pub enum Soken {
     /// used in ast verifyer to delete Soken's in constant propogation. Should not be used or referenced otherwise
     /// can be ignored in this file anyway
     Nil,
+    // (;)  we have a value, but don't use it
+    EndStat,
 
     /// one
     Return,
@@ -58,7 +60,7 @@ pub enum Soken {
     /// Name and nr of args
     /// expects nr of args
     /// the definition comes after, TODO how to know when it ends?
-    FuncDef(IdentIdx, u16),
+    FuncDef(IdentIdx),
     /// two
     Binop(BinaryOp),
     /// Name and nr args
@@ -231,6 +233,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         Token::Keyword(Keyword::StartParen),
                         "Expected start parenthesis after function name"
                     );
+                    self.push(Soken::FuncDef(func_name), place);
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut args = 0;
                     loop {
@@ -257,8 +260,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             ),
                         };
                     }
+
                     self.functions.insert(func_name, args);
-                    self.push(Soken::FuncDef(func_name, args), place);
                     self.parse_scope_require_start_brace(false);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
@@ -270,11 +273,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.push(Soken::CreateVar(name.1), name.0);
                     // parse expression let (a = 1+2+3)
                     self.parse_expr(); // this outputs expr
-                    eat_require!(
-                        self,
-                        Token::Keyword(Keyword::EndStatement),
-                        "statement must end with `;`"
-                    );
+                    self.require_semicolon(true);
                 }
                 // If statement
                 Token::Keyword(Keyword::If) => {
@@ -295,11 +294,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.eat(); // eat return token
                     self.parse_expr();
                     self.push(Soken::Return, place);
-                    eat_require!(
-                        self,
-                        Token::Keyword(Keyword::EndStatement),
-                        "Expected `;` after return expression"
-                    );
+                    self.require_semicolon(false);
                 }
                 Token::Keyword(Keyword::StartBlock) => {
                     self.parse_scope_require_start_brace(true); // notice no eating!
@@ -307,17 +302,11 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 Token::Keyword(Keyword::EndBlock) => {
                     return; // should be return? Idk, maybe break
                 }
-
                 // Function call, or just expression
                 &Token::Identifier(_) | Token::Int(_) | Token::String(_) => {
                     // parse the expression. e.g. f(x) + 42, or 32 + g(f(x))
                     self.parse_expr();
-
-                    eat_require!(
-                        self, // should be semicolon after expression:
-                        Token::Keyword(Keyword::EndStatement),
-                        "must end statement with `;`!"
-                    );
+                    self.require_semicolon(true);
                 }
                 &t => self.report_incorrect_semantics(
                     "Erroneous token to start statement with",
@@ -325,6 +314,18 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     place,
                 ),
             };
+        }
+    }
+
+    // expects semicolon and pushes EndStat Soken
+    fn require_semicolon(&mut self, push: bool) {
+        let place = eat_require!(
+            self,
+            Token::Keyword(Keyword::EndStatement),
+            "statement must end with `;`"
+        );
+        if push {
+            self.push(Soken::EndStat, place);
         }
     }
     /// add new semantic token, which was found at place

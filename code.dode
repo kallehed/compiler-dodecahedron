@@ -18,6 +18,7 @@ fn main() {
         let x =  4;
     }
     let x = 34;
+    return x == 2;
 
     fibb(1000000, 0, 1);
     print_zeroes(5);

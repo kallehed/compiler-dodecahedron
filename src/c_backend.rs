@@ -1,175 +1,288 @@
-use crate::{
-    parser::{BinaryOp, Soken},
-    IdentIdx,
-};
+use crate::parser::Soken;
+use std::collections::{HashMap, HashSet};
 
-const DEFAULT_TYPE: &str = "int64_t ";
+use crate::{parser::BinaryOp, IdentIdx};
 
-pub fn to_c_code(body: &ASTBody, ident_to_string: &[&'static str]) -> String {
-    struct Output<'a> {
-        code: String,
-        declarations: String,
-
-        // immutable
-        ident_to_string: &'a [&'static str],
+// check correctness of program + constant folding
+pub fn to_c_code<'a>(sokens: &'a [Soken], ident_idx_to_string: &[&'static str]) {
+    /// scope {} data
+    struct Scope {
+        // how many vars were created in this scope?
+        vars: usize,
+        returns: bool,
+        /// if a normal block {} returns, the outer block returns as well
+        propogates_return: bool,
+        /// is function body
+        must_return: bool,
     }
+    struct State<'b> {
+        /// function ident and nr of parameters
+        //function_calls: Vec<&'b ASTExpr>, // not used?
+        /// O(1) local var exists checker
+        vars: HashSet<IdentIdx>,
+        // each scope holds how many vars it creates, they are added here and removed from self.vars after scope ends
+        ordered_vars: Vec<IdentIdx>,
+        scopes: Vec<Scope>,
+        /// holds values, args and stuff, with their soken idx
+        stack: Vec<(StackItem, SokIdx)>,
+        sokens: &'b [Soken],
+        /// map from index of soken to it's token index in source file
+        si: SokIdx,
 
-    impl<'a> Output<'a> {
-        fn print(&mut self, to_out: &str) {
-            self.code.push_str(to_out);
-        }
-        fn declare(&mut self, to_out: &str) {
-            self.declarations.push_str(to_out);
-        }
+        // constant
+        // functions: &'b HashMap<IdentIdx, u16>,
+        ident_idx_to_string: &'b [&'static str],
+    }
+    let mut s = State {
+        vars: HashSet::new(),
+        ordered_vars: Vec::new(),
+        scopes: Vec::new(),
+        stack: Vec::new(),
+        sokens,
+        si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
 
-        fn function_to_c_name(&self, func: &IdentIdx) -> String {
-            let real_name = self.ident_to_string[*func as usize];
-            match real_name {
-                "print_int" => "print_int".to_string(),
-                "main" => "main".to_string(),
-                _ => format!("func{}", func),
+        ident_idx_to_string,
+    };
+    s.verify();
+
+    /// maybe better way, is: It could either be a literal, or it could be something unknown with a type
+    enum StackItem {
+        /// result of binop with variable, or from function call (can't evaulate those here (yet))
+        /// so something that will be Int at runtime
+        MixInt,
+        Int(i64),
+        /// from variable, or argument to function
+        Var,
+        Unit,
+    }
+    #[derive(Copy, Clone, Debug)]
+    struct SokIdx(usize);
+
+    impl State<'_> {
+        /// add var, also send token index of soken of var, uses implicit si
+        fn add_var(&mut self, name: IdentIdx) {
+            if !self.vars.insert(name) {
+                self.report_error("Variable has already been declared!");
+            }
+            // if global scope contains it, this can't (can't assert bc Vector::push)
+            self.scopes.last_mut().unwrap().vars += 1;
+            self.ordered_vars.push(name);
+        }
+        /// stack pop, get item, and where it originated from sokens
+        fn spop(&mut self) -> (StackItem, SokIdx) {
+            self.stack.pop().unwrap()
+        }
+        /// stack push item, including `i`, soken index it comes from
+        fn spush(&mut self, it: StackItem) {
+            self.stack.push((it, self.si));
+        }
+        fn sclear(&mut self) {
+            self.stack.clear();
+        }
+        fn create_scope(&mut self, propogates_return: bool, must_return: bool) {
+            self.scopes.push(Scope {
+                returns: false,
+                vars: 0,
+                propogates_return,
+                must_return,
+            });
+        }
+        fn eat(&mut self) -> Soken {
+            self.si.0 = self.si.0.wrapping_add(1);
+            self.sokens[self.si.0]
+        }
+        /// internal logic assertion on nbr of items on stack
+        fn sexpect(&mut self, items: usize) {
+            if self.stack.len() != items {
+                println!();
+                self.report_error(&format!(
+                    "got {} stackitems, but wants {}",
+                    self.stack.len(),
+                    items
+                ));
             }
         }
-
-        fn var_to_c_name(&self, var: &IdentIdx) -> String {
-            format!("var{}", var)
+        fn sexpect_clear(&mut self, items: usize) {
+            self.sexpect(items);
+            self.sclear();
         }
+        /// What it does:
+        /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
+        ///
+        /// - make sure setters like =,+=,-= are only called with variables as left arg
+        /// - make sure all functions return values across all control flow paths
+        /// - propogate constants through expressions like 1+2 to 3
+        /// *- make sure function calls provide correct number of arguments
+        /// *- calls to nonexistent functions caught
+        /// - variables not (used before declaration, declared more than once)
+        /// - verify that you aren't doing things like x = (x = 3);
+        /// TODO-FIX: can't to return x = 3;
+        fn verify(&mut self) {
+            // for each scope, we have a vec cataloging the variables that exist, makes poping easier
+            loop {
+                match self.eat() {
+                    Soken::EndStat => {
+                        self.sexpect_clear(1); // throw away 1 stack item
+                    }
+                    // TODO: expr has to be int
+                    Soken::Return => {
+                        self.sexpect(1);
+                        let ret_val = self.spop();
+                        if let StackItem::Unit = ret_val.0 {
+                            self.report_error("Can't return Unit");
+                        }
+                        // signal that this scope returns
+                        self.scopes.last_mut().unwrap().returns = true;
+                    }
+                    Soken::CreateVar(name) => {
+                        self.sexpect(0);
+                        self.add_var(name);
+                    }
+                    // basically just create arg variables
+                    // TODO: maybe store name ident in scope so we can print it later if function doesn't return?
+                    Soken::FuncDef(name) => {
+                        self.sexpect(0);
+                        self.create_scope(false, true); // false bc outer scope is weird
+                        let args = *self.functions.get(&name).unwrap();
+                        // add to scope, must not shadow, TODO
+                        for _ in 0..args {
+                            match self.eat() {
+                                Soken::Var(arg) => {
+                                    self.add_var(arg);
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                    // TODO: check type of arg, can't be unit
+                    Soken::If => {
+                        self.sexpect_clear(1);
+                        self.create_scope(false, false); // don't know if reached
+                    }
+                    Soken::While => {
+                        self.sexpect_clear(1);
+                        self.create_scope(false, false); // don't know if reached
+                    }
+                    Soken::ScopeStart => {
+                        self.sexpect(0);
+                        self.create_scope(true, false);
+                    } // basic scope
+                    // remove the variables that were in the scope from the global vars
+                    Soken::ScopeEnd => {
+                        self.sexpect(0);
+                        let scope = self.scopes.last().unwrap();
+                        for _ in 0..scope.vars {
+                            assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
+                        }
+                        if scope.must_return && !scope.returns {
+                            // BAD! Can't just end while not having returned anything!
+                            self.report_error("Function did not return");
+                        }
+                        let outer_scope_returns = scope.propogates_return && scope.returns;
+                        self.scopes.pop();
 
-        fn binary_op_to_c_name(&self, op: &BinaryOp) -> &'static str {
-            match op {
-                BinaryOp::SetAdd => "+=",
-                BinaryOp::SetSub => "-=",
-                BinaryOp::Set => "=",
-                BinaryOp::Eql => "==",
-                BinaryOp::Les => "<",
-                BinaryOp::Mor => ">",
-                BinaryOp::Add => "+",
-                BinaryOp::Sub => "-",
-                BinaryOp::Mul => "*",
-            }
-        }
+                        if !self.scopes.is_empty() {
+                            // if at function
+                            self.scopes.last_mut().unwrap().returns |= outer_scope_returns;
+                        }
+                    }
+                    // HERE BEGINS EXPR SOKENS
+                    Soken::Int(e) => self.spush(StackItem::Int(e)),
+                    // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
+                    Soken::Var(e) => {
+                        if !self.vars.contains(&e) {
+                            self.report_error("Variable used before declaration");
+                        }
+                        self.spush(StackItem::Var);
+                    }
 
-        fn function_to_c_start_of_function(&self, name: &IdentIdx, args: &[IdentIdx]) -> String {
-            let mut out = String::new();
-
-            out.push_str(DEFAULT_TYPE);
-            out.push_str(&self.function_to_c_name(name));
-            out.push('(');
-            for (idx, arg) in args.iter().enumerate() {
-                out.push_str(DEFAULT_TYPE);
-                out.push_str(&self.var_to_c_name(arg));
-                if idx == args.len() - 1 {
+                    // CALL to ALREADY EXISTING function
+                    Soken::FuncCall(name, supposed_args) => {
+                        // make sure function called with correct nr of arguments
+                        if let Some(&args) = self.functions.get(&name) {
+                            if args != supposed_args {
+                                self.report_error(&format!(
+                                    "Function should be called with {} arg(s), got {}",
+                                    args, supposed_args
+                                ));
+                            }
+                        } else {
+                            self.report_error("Function does not exist");
+                        }
+                        self.sclear(); // drop elements of stack
+                        self.spush(StackItem::MixInt); // add unknown stack element, because we don't know what the function returns
+                    }
+                    // make sure that setters have a left l-value,
+                    // if regular binop, constant propogate ints
+                    Soken::Binop(binop) => {
+                        // self.sexpect(2, "binop needs two values");
+                        let right = self.spop();
+                        let left = self.spop();
+                        // TODO: DRY the code
+                        match left.0 {
+                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::Unit => self.report_error("Can't do binop on Unit"),
+                        }
+                        match right.0 {
+                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::Unit => self.report_error("Can't do binop on Unit"),
+                        }
+                        use BinaryOp as B;
+                        match binop {
+                            B::SetAdd | B::SetSub | B::Set => {
+                                // `left` has to be ident
+                                if let StackItem::Var = left.0 {
+                                    self.spush(StackItem::Unit); // setting returns Unit
+                                } else {
+                                    self.report_error( "Left hand side of setter can't be expression, must be variable name")
+                                }
+                            }
+                            B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
+                                // constant propogation
+                                if let (StackItem::Int(l), StackItem::Int(r)) = (left.0, right.0) {
+                                    // bc rust semantics we do wrapping_add etc
+                                    let res = match binop {
+                                        B::Eql => (l == r) as i64,
+                                        B::Les => (l < r) as i64,
+                                        B::Mor => (l > r) as i64,
+                                        B::Add => l.wrapping_add(r),
+                                        B::Sub => l.wrapping_sub(r),
+                                        B::Mul => l.wrapping_mul(r),
+                                        _ => unreachable!(),
+                                    };
+                                    self.sokens[left.1 .0] = Soken::Nil;
+                                    self.sokens[right.1 .0] = Soken::Nil;
+                                    self.sokens[self.si.0] = Soken::Int(res); // propogation
+                                    self.spush(StackItem::Int(res));
+                                } else {
+                                    // one is either unknown or variable -> Unknown
+                                    self.spush(StackItem::MixInt);
+                                }
+                            }
+                        }
+                    }
+                    Soken::Nil => {
+                        unreachable!("ast won't contain nil after parsing, so impossible")
+                    }
+                }
+                // YES this is weird, but bc we start at usize::MAX for `si` we have to do this at end
+                if self.si.0 + 1 >= self.sokens.len() {
                     break;
                 }
-                out.push(',');
-            }
-            out.push(')');
-            out
-        }
-
-        fn body_to_c(&mut self, body: &ASTBody) {
-            for stat in body {
-                match &stat.0 {
-                    InASTStatement::If {
-                        condition,
-                        if_true_body,
-                        if_false_body,
-                    } => {
-                        self.print("if (");
-                        self.expr_to_c(condition);
-                        self.print("){");
-                        self.body_to_c(if_true_body);
-                        self.print("}else{");
-                        self.body_to_c(if_false_body);
-                        self.print("}");
-                    }
-                    InASTStatement::While { condition, body } => {
-                        self.print("while (");
-                        self.expr_to_c(condition);
-                        self.print("){");
-                        self.body_to_c(body);
-                        self.print("}");
-                    }
-                    InASTStatement::EvalExpr(expr) => {
-                        self.expr_to_c(expr);
-                        self.print(";");
-                    }
-                    InASTStatement::Function { name, args, body } => {
-                        let first_part = self.function_to_c_start_of_function(name, args);
-                        self.print(&first_part);
-                        self.declare(&first_part);
-                        self.declare(";");
-
-                        self.print("{");
-                        self.body_to_c(body);
-                        self.print("}");
-                    }
-                    InASTStatement::CreateVar(var_name) => {
-                        self.print(DEFAULT_TYPE);
-                        self.print(&self.var_to_c_name(var_name));
-                        self.print(";");
-                    }
-                    InASTStatement::Return(expr) => {
-                        self.print("return ");
-                        self.expr_to_c(expr);
-                        self.print(";");
-                    }
-                    InASTStatement::Block(block) => {
-                        self.print("{");
-                        self.body_to_c(block);
-                        self.print("}");
-                    }
-                }
             }
         }
-
-        fn expr_to_c(&mut self, expr: &ASTExpr) {
-            match &expr.0 {
-                InASTExpr::Int(int) => {
-                    self.print(&int.to_string());
-                }
-                InASTExpr::VarName(var_name) => {
-                    self.print(&self.var_to_c_name(var_name));
-                }
-                InASTExpr::FunctionCall(name, args) => {
-                    self.print(&self.function_to_c_name(name));
-                    self.print("(");
-                    for (idx, arg) in args.iter().enumerate() {
-                        self.expr_to_c(arg);
-                        if idx == args.len() - 1 {
-                            break;
-                        }
-                        self.print(",");
-                    }
-                    self.print(")");
-                }
-                InASTExpr::Binary(op, left, right) => {
-                    // same for L-value binarys and normal exprs
-                    self.print("((");
-
-                    self.expr_to_c(left);
-
-                    self.print(")");
-
-                    self.print(self.binary_op_to_c_name(op));
-
-                    self.print("(");
-
-                    self.expr_to_c(right);
-
-                    self.print("))");
-                }
-            }
+        fn report_error_on_token_idx(&mut self, msg: &str, si: SokIdx) -> ! {
+            crate::mark_error_in_source(
+                self.source,
+                self.file_name,
+                msg,
+                self.token_idx_to_char_range[self.origins[si.0]],
+            );
+            std::process::exit(1);
+        }
+        // implcitily reports on current soken idx
+        fn report_error(&mut self, msg: &str) -> ! {
+            self.report_error_on_token_idx(msg, self.si);
         }
     }
-
-    let mut out = Output {
-        code: String::new(),
-        declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
-        ident_to_string,
-    };
-
-    out.body_to_c(body);
-    out.declarations.push_str(&out.code);
-    out.declarations
 }

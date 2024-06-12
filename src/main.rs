@@ -1,6 +1,6 @@
 // mod asm_backend;
 mod ast_verify;
-//mod c_backend;
+mod c_backend;
 mod lexer;
 mod parser;
 
@@ -83,22 +83,23 @@ fn main() {
         file_name,
         &token_idx_to_char_range,
     );
+    // TODO filter Nil from Sokens
 
     println!("After verifying: {:?}", sokens);
 
     //ast_interpreter::run_ast(&ast);
-    /*{
-    let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);
-
-    println!("\n--- Now printing C code: \n");
-    println!("{}", c_code);
-
     {
-        use std::io::Write;
-        let mut file = std::fs::File::create("out.c").unwrap();
-        file.write_all(c_code.as_bytes()).unwrap();
+        let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string);
+
+        println!("\n--- Now printing C code: \n");
+        println!("{}", c_code);
+
+        {
+            use std::io::Write;
+            let mut file = std::fs::File::create("out.c").unwrap();
+            file.write_all(c_code.as_bytes()).unwrap();
+        }
     }
-    }*/
 
     // generate assembly (NASM)
     /*{

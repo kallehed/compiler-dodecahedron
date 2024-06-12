@@ -23,6 +23,10 @@ pub fn run<'a>(
         /// is function body
         must_return: bool,
     }
+    /// Why even let the Stack hold both (StackItem, SokIdx), the stackItem says if it's a literal,mixint,var or Unit
+    /// The SokIdx says where it was found. BUT: Instead of looking at the StackItem, we can simply index Soken's
+    /// with the SokIdx, and we will get what it was (Any Soken) (Int,Var,Func), we can also use Nil to represent a
+    /// combined value of Var and Int.
     struct State<'b> {
         /// function ident and nr of parameters
         //function_calls: Vec<&'b ASTExpr>, // not used?
@@ -44,13 +48,6 @@ pub fn run<'a>(
         source: &'b str,
         file_name: &'b str,
         token_idx_to_char_range: &'b [(usize, usize)],
-    }
-    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-    enum Type {
-        /// Returned by expressions such as x = 3;
-        Unit,
-        /// standard type for language currently
-        Int,
     }
     let mut s = State {
         vars: HashSet::new(),
@@ -150,19 +147,14 @@ pub fn run<'a>(
                     }
                     // TODO: expr has to be int
                     Soken::Return => {
-                        self.sexpect_clear(1); // throw away 1 stack item
-                                               // signal that this scope returns
+                        self.sexpect(1);
+                        let ret_val = self.spop();
+                        if let StackItem::Unit = ret_val.0 {
+                            self.report_error("Can't return Unit");
+                        }
+                        // signal that this scope returns
                         self.scopes.last_mut().unwrap().returns = true;
                     }
-                    Soken::Int(e) => self.spush(StackItem::Int(e)),
-                    // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
-                    Soken::Var(e) => {
-                        if !self.vars.contains(&e) {
-                            self.report_error("Variable used before declaration");
-                        }
-                        self.spush(StackItem::Var);
-                    }
-
                     Soken::CreateVar(name) => {
                         self.sexpect(0);
                         self.add_var(name);
@@ -183,6 +175,48 @@ pub fn run<'a>(
                             }
                         }
                     }
+                    // TODO: check type of arg, can't be unit
+                    Soken::If => {
+                        self.sexpect_clear(1);
+                        self.create_scope(false, false); // don't know if reached
+                    }
+                    Soken::While => {
+                        self.sexpect_clear(1);
+                        self.create_scope(false, false); // don't know if reached
+                    }
+                    Soken::ScopeStart => {
+                        self.sexpect(0);
+                        self.create_scope(true, false);
+                    } // basic scope
+                    // remove the variables that were in the scope from the global vars
+                    Soken::ScopeEnd => {
+                        self.sexpect(0);
+                        let scope = self.scopes.last().unwrap();
+                        for _ in 0..scope.vars {
+                            assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
+                        }
+                        if scope.must_return && !scope.returns {
+                            // BAD! Can't just end while not having returned anything!
+                            self.report_error("Function did not return");
+                        }
+                        let outer_scope_returns = scope.propogates_return && scope.returns;
+                        self.scopes.pop();
+
+                        if !self.scopes.is_empty() {
+                            // if at function
+                            self.scopes.last_mut().unwrap().returns |= outer_scope_returns;
+                        }
+                    }
+                    // HERE BEGINS EXPR SOKENS
+                    Soken::Int(e) => self.spush(StackItem::Int(e)),
+                    // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
+                    Soken::Var(e) => {
+                        if !self.vars.contains(&e) {
+                            self.report_error("Variable used before declaration");
+                        }
+                        self.spush(StackItem::Var);
+                    }
+
                     // CALL to ALREADY EXISTING function
                     Soken::FuncCall(name, supposed_args) => {
                         // make sure function called with correct nr of arguments
@@ -248,38 +282,11 @@ pub fn run<'a>(
                             }
                         }
                     }
-                    // TODO: check type of arg, can't be unit
-                    Soken::If => {
-                        self.sexpect_clear(1);
-                        self.create_scope(false, false); // don't know if reached
-                    }
-                    Soken::While => {
-                        self.sexpect_clear(1);
-                        self.create_scope(false, false); // don't know if reached
-                    }
-                    Soken::ScopeStart => self.create_scope(true, false), // basic scope
-                    // remove the variables that were in the scope from the global vars
-                    Soken::ScopeEnd => {
-                        let scope = self.scopes.last().unwrap();
-                        for _ in 0..scope.vars {
-                            assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
-                        }
-                        if scope.must_return && !scope.returns {
-                            // BAD! Can't just end while not having returned anything!
-                            self.report_error("Function did not return");
-                        }
-                        let outer_scope_returns = scope.propogates_return && scope.returns;
-                        self.scopes.pop();
-
-                        if !self.scopes.is_empty() {
-                            // if at function
-                            self.scopes.last_mut().unwrap().returns |= outer_scope_returns;
-                        }
-                    }
                     Soken::Nil => {
                         unreachable!("ast won't contain nil after parsing, so impossible")
                     }
                 }
+                // YES this is weird, but bc we start at usize::MAX for `si` we have to do this at end
                 if self.si.0 + 1 >= self.sokens.len() {
                     break;
                 }

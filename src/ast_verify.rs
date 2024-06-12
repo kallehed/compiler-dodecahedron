@@ -13,8 +13,10 @@ pub fn run<'a>(
     file_name: &'a str,
     token_idx_to_char_range: &[(usize, usize)],
 ) {
+    /// scope {} data
     struct Scope {
-        vars: Vec<IdentIdx>,
+        // how many vars were created in this scope?
+        vars: usize,
         returns: bool,
         /// if a normal block {} returns, the outer block returns as well
         propogates_return: bool,
@@ -26,6 +28,8 @@ pub fn run<'a>(
         //function_calls: Vec<&'b ASTExpr>, // not used?
         /// O(1) local var exists checker
         vars: HashSet<IdentIdx>,
+        // each scope holds how many vars it creates, they are added here and removed from self.vars after scope ends
+        ordered_vars: Vec<IdentIdx>,
         scopes: Vec<Scope>,
         /// holds values, args and stuff, with their soken idx
         stack: Vec<(StackItem, SokIdx)>,
@@ -50,6 +54,7 @@ pub fn run<'a>(
     }
     let mut s = State {
         vars: HashSet::new(),
+        ordered_vars: Vec::new(),
         scopes: Vec::new(),
         stack: Vec::new(),
         sokens,
@@ -84,7 +89,8 @@ pub fn run<'a>(
                 self.report_error("Variable has already been declared!");
             }
             // if global scope contains it, this can't (can't assert bc Vector::push)
-            self.scopes.last_mut().unwrap().vars.push(name);
+            self.scopes.last_mut().unwrap().vars += 1;
+            self.ordered_vars.push(name);
         }
         /// stack pop, get item, and where it originated from sokens
         fn spop(&mut self) -> (StackItem, SokIdx) {
@@ -100,7 +106,7 @@ pub fn run<'a>(
         fn create_scope(&mut self, propogates_return: bool, must_return: bool) {
             self.scopes.push(Scope {
                 returns: false,
-                vars: Vec::new(),
+                vars: 0,
                 propogates_return,
                 must_return,
             });
@@ -255,8 +261,8 @@ pub fn run<'a>(
                     // remove the variables that were in the scope from the global vars
                     Soken::ScopeEnd => {
                         let scope = self.scopes.last().unwrap();
-                        for var in scope.vars.iter() {
-                            assert!(self.vars.remove(var));
+                        for _ in 0..scope.vars {
+                            assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
                         }
                         if scope.must_return && !scope.returns {
                             // BAD! Can't just end while not having returned anything!

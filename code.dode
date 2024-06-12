@@ -15,6 +15,7 @@ fn main() {
 
     if 34 {
         print_int(233);
+        let x =  4;
     }
     let x = 34;
 

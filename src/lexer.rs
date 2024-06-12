@@ -9,6 +9,8 @@ use crate::SetType;
 use crate::COMMENT_PREFIX;
 use crate::STRING_DELIMITER;
 
+// TODO find paren mismatches
+
 #[derive(Debug, Copy, Clone)]
 pub enum Token {
     String(&'static str),

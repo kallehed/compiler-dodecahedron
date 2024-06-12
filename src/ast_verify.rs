@@ -27,6 +27,9 @@ pub fn run<'a>(
     /// The SokIdx says where it was found. BUT: Instead of looking at the StackItem, we can simply index Soken's
     /// with the SokIdx, and we will get what it was (Any Soken) (Int,Var,Func), we can also use Nil to represent a
     /// combined value of Var and Int.
+    /// well, no, we don't just want to store indicies into sokens, because then we don't get any type safety on
+    /// our stack values, and the only things on our stack is vars, literals and so on.
+    /// a better way would be to NOT store literals inline, but use the soken index to get the literal if we want
     struct State<'b> {
         /// function ident and nr of parameters
         //function_calls: Vec<&'b ASTExpr>, // not used?
@@ -68,12 +71,11 @@ pub fn run<'a>(
 
     /// maybe better way, is: It could either be a literal, or it could be something unknown with a type
     enum StackItem {
-        /// result of binop with variable, or from function call (can't evaulate those here (yet))
-        /// so something that will be Int at runtime
-        MixInt,
-        Int(i64),
-        /// from variable, or argument to function
-        Var,
+        /// int literal 34, 54, 21, use SokIdx to get what it is if you want
+        /// common case is not to look at int literals, so use array access for that.
+        LitInt,
+        /// from variable, or argument to function, OR result of variable addition or whatever x + y, x+1
+        UnkownInt,
         Unit,
     }
     #[derive(Copy, Clone, Debug)]
@@ -208,13 +210,13 @@ pub fn run<'a>(
                         }
                     }
                     // HERE BEGINS EXPR SOKENS
-                    Soken::Int(e) => self.spush(StackItem::Int(e)),
+                    Soken::Int(_) => self.spush(StackItem::LitInt),
                     // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
                     Soken::Var(e) => {
                         if !self.vars.contains(&e) {
                             self.report_error("Variable used before declaration");
                         }
-                        self.spush(StackItem::Var);
+                        self.spush(StackItem::UnkownInt);
                     }
 
                     // CALL to ALREADY EXISTING function
@@ -231,7 +233,7 @@ pub fn run<'a>(
                             self.report_error("Function does not exist");
                         }
                         self.sclear(); // drop elements of stack
-                        self.spush(StackItem::MixInt); // add unknown stack element, because we don't know what the function returns
+                        self.spush(StackItem::UnkownInt); // add unknown stack element, because we don't know what the function returns
                     }
                     // make sure that setters have a left l-value,
                     // if regular binop, constant propogate ints
@@ -241,18 +243,18 @@ pub fn run<'a>(
                         let left = self.spop();
                         // TODO: DRY the code
                         match left.0 {
-                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::LitInt | StackItem::UnkownInt => (),
                             StackItem::Unit => self.report_error("Can't do binop on Unit"),
                         }
                         match right.0 {
-                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::LitInt | StackItem::UnkownInt => (),
                             StackItem::Unit => self.report_error("Can't do binop on Unit"),
                         }
                         use BinaryOp as B;
                         match binop {
                             B::SetAdd | B::SetSub | B::Set => {
                                 // `left` has to be ident
-                                if let StackItem::Var = left.0 {
+                                if let StackItem::UnkownInt = left.0 {
                                     self.spush(StackItem::Unit); // setting returns Unit
                                 } else {
                                     self.report_error( "Left hand side of setter can't be expression, must be variable name")
@@ -260,7 +262,16 @@ pub fn run<'a>(
                             }
                             B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
                                 // constant propogation
-                                if let (StackItem::Int(l), StackItem::Int(r)) = (left.0, right.0) {
+                                if let (StackItem::LitInt, StackItem::LitInt) = (left.0, right.0) {
+                                    // get values
+                                    let l = match self.sokens[left.1 .0] {
+                                        Soken::Int(e) => e,
+                                        _ => unreachable!(),
+                                    };
+                                    let r = match self.sokens[right.1 .0] {
+                                        Soken::Int(e) => e,
+                                        _ => unreachable!(),
+                                    };
                                     // bc rust semantics we do wrapping_add etc
                                     let res = match binop {
                                         B::Eql => (l == r) as i64,
@@ -274,10 +285,9 @@ pub fn run<'a>(
                                     self.sokens[left.1 .0] = Soken::Nil;
                                     self.sokens[right.1 .0] = Soken::Nil;
                                     self.sokens[self.si.0] = Soken::Int(res); // propogation
-                                    self.spush(StackItem::Int(res));
+                                    self.spush(StackItem::LitInt);
                                 } else {
-                                    // one is either unknown or variable -> Unknown
-                                    self.spush(StackItem::MixInt);
+                                    self.spush(StackItem::UnkownInt); // one is either unknown or variable -> Var
                                 }
                             }
                         }
@@ -286,7 +296,7 @@ pub fn run<'a>(
                         unreachable!("ast won't contain nil after parsing, so impossible")
                     }
                 }
-                // YES this is weird, but bc we start at usize::MAX for `si` we have to do this at end
+                // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
                 if self.si.0 + 1 >= self.sokens.len() {
                     break;
                 }

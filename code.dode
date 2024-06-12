@@ -13,6 +13,8 @@ fn main() {
     }
     fibb(2+3*3,3,2+1+1+1+1);
 
+    return 34;
+
     if 34 {
         print_int(233);
         let x =  4;

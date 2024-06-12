@@ -115,7 +115,6 @@ fn main() {
     }*/
 }
 
-const STRING_DELIMITER: char = '"';
 const COMMENT_PREFIX: char = '#';
 
 type IdentIdx = u16;

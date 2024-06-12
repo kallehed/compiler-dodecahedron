@@ -12,6 +12,7 @@ fn main() {
         print_int(69);
     }
     fibb(2+3*3,3,2+1+1+1+1);
+    let a = 3434;
 
     return 34;
 

@@ -7,7 +7,6 @@ use crate::Int;
 use crate::Keyword;
 use crate::SetType;
 use crate::COMMENT_PREFIX;
-use crate::STRING_DELIMITER;
 
 // TODO find paren mismatches
 
@@ -127,7 +126,9 @@ pub fn generate_tokens(
 }
 
 impl<'a> Lexer<'a> {
-    fn report_incorrect_syntax(&self, msg: &str, start_wher: usize, end_wher: usize) {
+    fn report_incorrect_syntax(&mut self, msg: &str) {
+        let start_wher = self.start_char_idx;
+        let end_wher = self.peek().0;
         // TODO print better error message
         let mut line = 1;
         let mut col = 1;
@@ -177,11 +178,15 @@ impl<'a> Lexer<'a> {
         };
         self.push(Token::Identifier(idx));
     }
+    fn get_str(&mut self) -> &'static str {
+        let end = self.peek().0;
+        &self.source[self.start_char_idx..end]
+    }
 
     fn lex(&mut self) {
         while let Some((start_idx, ch)) = self.chars.next() {
             self.start_char_idx = start_idx;
-            println!("char {}", ch);
+            // println!("char {}", ch);
             match ch {
                 COMMENT_PREFIX => {
                     while self.peek().1 != '\n' {
@@ -191,13 +196,11 @@ impl<'a> Lexer<'a> {
                 }
                 // ignore whitespace
                 _ if ch.is_whitespace() => (),
-                STRING_DELIMITER => {
-                    while self.peek().1 != STRING_DELIMITER {
-                        self.eat();
-                    }
-                    let (end_idx, _) = self.eat(); // eat the end string delimiter
-                    let the_str = &self.source[(start_idx + 1)..end_idx];
-                    self.push(Token::String(the_str));
+
+                '"' => {
+                    while self.eat().1 != '"' {} // eat last
+                    let s = self.get_str(); // TODO: this is actually probably wrong and will include the "" in the string
+                    self.push(Token::String(s));
                 }
                 // parse number
                 _ if ch.is_numeric() => {
@@ -205,29 +208,17 @@ impl<'a> Lexer<'a> {
                         self.eat();
                     }
 
-                    let (mut end_idx, mut after_char) = self.peek();
+                    let (_, after_char) = self.peek();
 
-                    if after_char == '.' {
-                        // floating point number
-                        self.eat();
-                        while self.peek().1.is_numeric() {
-                            self.eat();
-                        }
-                        let (another_end_idx, another_after_char) = self.peek();
-                        end_idx = another_end_idx;
-                        after_char = another_after_char;
-                    }
                     // if the character after the number is a letter, error
                     if after_char.is_alphabetic() {
                         self.report_incorrect_syntax(
                             "Invalid number! Numbers cannot be followed by letters!",
-                            start_idx,
-                            end_idx,
                         );
                     }
                     // TODO turn into floating point token if floating point
 
-                    let num_str = &self.source[start_idx..end_idx];
+                    let num_str = self.get_str();
                     let num = num_str.parse::<_>().unwrap();
                     self.push(Token::Int(num));
                 }
@@ -246,16 +237,14 @@ impl<'a> Lexer<'a> {
                     } {
                         self.eat();
                     }
-                    let (end_idx, _) = self.peek();
-                    let keyword_str = &self.source[start_idx..end_idx];
+                    let keyword_str = self.get_str();
                     match self.mathy_keywords.get(keyword_str) {
                         Some(&kw) => self.push(Token::Keyword(kw)),
                         None => {
-                            self.report_incorrect_syntax(
-                                &format!("Invalid operator keyword: `{}`", keyword_str),
-                                start_idx, // Error invalid mathy keyword!
-                                end_idx,
-                            );
+                            self.report_incorrect_syntax(&format!(
+                                "Invalid operator keyword: `{}`",
+                                keyword_str
+                            ));
                         }
                     }
                 }
@@ -268,10 +257,8 @@ impl<'a> Lexer<'a> {
                     } {
                         self.eat();
                     }
-                    let (end_idx, _) = self.peek();
-
                     // check if it is a keyword
-                    let name_str = &self.source[start_idx..end_idx];
+                    let name_str = self.get_str();
                     match self.str_to_keyword.get(name_str) {
                         Some(&keyword) => self.push(Token::Keyword(keyword)),
                         None => {

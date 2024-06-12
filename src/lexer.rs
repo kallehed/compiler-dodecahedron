@@ -174,11 +174,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex(&mut self) {
-        loop {
-            let (start_idx, ch) = match self.chars.next() {
-                Some(v) => v,
-                None => break,
-            };
+        while let Some((start_idx, ch)) = self.chars.next() {
             println!("char {}", ch);
             match ch {
                 COMMENT_PREFIX => {

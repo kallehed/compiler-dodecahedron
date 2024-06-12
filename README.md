@@ -54,6 +54,7 @@ CREATE_VAR:
 let a = 2;
  ->  [crtvar a] [a][2][=]           two statements
 FORM: [CREATE_VAR] [EXPR]
+(problem with this is you can reference the variable in the definition: let x=x)
 
 SEMICOLON:
 1+2;
@@ -79,6 +80,7 @@ IF:
 if 420 {return 2;}
 ->    [420] [if] [2] [ret] [}]
 FORM: [COND] [IF] [TRUE_STATEMENTS] [}]
+(good that if isn't succeded by {, as this would be unnecessary, also that block is different, as returns guaranteed)
 
 FN_DEF: (nr of args could be implicit)
 fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
@@ -86,6 +88,7 @@ fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
 FORM:  [FUNC_IDENT] [ARG]... [STATEMENT] [}]
 (get nbr of args from hashmap)
 
+Making an API to look at this:
 
 # Troubles:
 On linux, when you run a program it is by default line buffered (input sent on \n),

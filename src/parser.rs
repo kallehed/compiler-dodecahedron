@@ -202,11 +202,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
     /// doesn't output any { or } sokens
     fn parse_scope(&mut self) {
-        loop {
-            let &(place, &token) = match self.tokens.peek() {
-                Some(tok) => tok,
-                None => break,
-            };
+        while let Some(&(place, &token)) = self.tokens.peek() {
             println!("parse token {:?}", token);
             match &token {
                 Token::Keyword(Keyword::FunctionIncoming) => {
@@ -394,8 +390,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_expr(&mut self) {
         // TODO: add prefix unary operator parsing here
         self.parse_primary();
-
-        return self.parse_binop_and_right(0);
+        self.parse_binop_and_right(0)
     }
 
     fn parse_binop_and_right(&mut self, prev_prec: BinOpPrec) {

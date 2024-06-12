@@ -84,6 +84,8 @@ fn main() {
         &token_idx_to_char_range,
     );
 
+    println!("After verifying: {:?}", sokens);
+
     //ast_interpreter::run_ast(&ast);
     /*{
     let c_code = c_backend::to_c_code(&ast, &ident_idx_to_string);

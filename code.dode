@@ -11,12 +11,16 @@ fn main() {
     if 0 {
         print_int(69);
     }
-    fibb(x,x,x);
+    fibb(2+3*3,3,2+1+1+1+1);
+
+    if 34 {
+        print_int(233);
+    }
+    let x = 34;
 
     fibb(1000000, 0, 1);
     print_zeroes(5);
     #let x = 1 + (x = 3);
-    let x = 69;
 
     let b = 1;
     while b < 10 {

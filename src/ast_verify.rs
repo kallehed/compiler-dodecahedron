@@ -64,21 +64,15 @@ pub fn run<'a>(
     };
     s.verify();
 
+    /// maybe better way, is: It could either be a literal, or it could be something unknown with a type
     enum StackItem {
         /// result of binop with variable, or from function call (can't evaulate those here (yet))
-        Unknown,
+        /// so something that will be Int at runtime
+        MixInt,
         Int(i64),
         /// from variable, or argument to function
-        Var(IdentIdx),
+        Var,
         Unit,
-    }
-    impl StackItem {
-        fn as_var(self) -> IdentIdx {
-            match self {
-                StackItem::Var(i) => i,
-                _ => unreachable!(),
-            }
-        }
     }
     #[derive(Copy, Clone, Debug)]
     struct SokIdx(usize);
@@ -130,17 +124,17 @@ pub fn run<'a>(
             self.sexpect(items);
             self.sclear();
         }
-        /// what it does:
+        /// What it does:
         /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
         ///
-        /// - make sure setters like =,+=,-= are only called with idents as left arg
+        /// - make sure setters like =,+=,-= are only called with variables as left arg
         /// - make sure all functions return values across all control flow paths
         /// - propogate constants through expressions like 1+2 to 3
         /// *- make sure function calls provide correct number of arguments
         /// *- calls to nonexistent functions caught
-        /// - variables are not used before declaration
-        /// - variables are not declared more than once
-        /// - possibly(?) verify that you aren't doing things like x = (x = 3);
+        /// - variables not (used before declaration, declared more than once)
+        /// - verify that you aren't doing things like x = (x = 3);
+        /// TODO-FIX: can't to return x = 3;
         fn verify(&mut self) {
             // for each scope, we have a vec cataloging the variables that exist, makes poping easier
             loop {
@@ -148,14 +142,20 @@ pub fn run<'a>(
                     Soken::EndStat => {
                         self.sexpect_clear(1); // throw away 1 stack item
                     }
+                    // TODO: expr has to be int
                     Soken::Return => {
                         self.sexpect_clear(1); // throw away 1 stack item
                                                // signal that this scope returns
                         self.scopes.last_mut().unwrap().returns = true;
                     }
                     Soken::Int(e) => self.spush(StackItem::Int(e)),
-                    // lazy checking for if variable is declared in binop -> bc parsing function declaration, don't know if best way
-                    Soken::Var(e) => self.spush(StackItem::Var(e)),
+                    // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
+                    Soken::Var(e) => {
+                        if !self.vars.contains(&e) {
+                            self.report_error("Variable used before declaration");
+                        }
+                        self.spush(StackItem::Var);
+                    }
 
                     Soken::CreateVar(name) => {
                         self.sexpect(0);
@@ -177,6 +177,7 @@ pub fn run<'a>(
                             }
                         }
                     }
+                    // CALL to ALREADY EXISTING function
                     Soken::FuncCall(name, supposed_args) => {
                         // make sure function called with correct nr of arguments
                         if let Some(&args) = self.functions.get(&name) {
@@ -190,7 +191,7 @@ pub fn run<'a>(
                             self.report_error("Function does not exist");
                         }
                         self.sclear(); // drop elements of stack
-                        self.spush(StackItem::Unknown); // add unknown stack element, because we don't know what the function returns
+                        self.spush(StackItem::MixInt); // add unknown stack element, because we don't know what the function returns
                     }
                     // make sure that setters have a left l-value,
                     // if regular binop, constant propogate ints
@@ -198,23 +199,20 @@ pub fn run<'a>(
                         // self.sexpect(2, "binop needs two values");
                         let right = self.spop();
                         let left = self.spop();
-                        fn check_declared(s: &mut State, it: &(StackItem, SokIdx)) {
-                            if let StackItem::Var(e) = it.0 {
-                                if !s.vars.contains(&e) {
-                                    s.report_error_on_token_idx(
-                                        "Variable used before declaration",
-                                        it.1,
-                                    );
-                                }
-                            }
+                        // TODO: DRY the code
+                        match left.0 {
+                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::Unit => self.report_error("Can't do binop on Unit"),
                         }
-                        check_declared(self, &left);
-                        check_declared(self, &right);
+                        match right.0 {
+                            StackItem::MixInt | StackItem::Int(_) | StackItem::Var => {}
+                            StackItem::Unit => self.report_error("Can't do binop on Unit"),
+                        }
                         use BinaryOp as B;
                         match binop {
                             B::SetAdd | B::SetSub | B::Set => {
-                                // `l` has to be ident
-                                if let StackItem::Var(_) = left.0 {
+                                // `left` has to be ident
+                                if let StackItem::Var = left.0 {
                                     self.spush(StackItem::Unit); // setting returns Unit
                                 } else {
                                     self.report_error( "Left hand side of setter can't be expression, must be variable name")
@@ -239,18 +237,18 @@ pub fn run<'a>(
                                     self.spush(StackItem::Int(res));
                                 } else {
                                     // one is either unknown or variable -> Unknown
-                                    self.spush(StackItem::Unknown);
+                                    self.spush(StackItem::MixInt);
                                 }
                             }
                         }
                     }
+                    // TODO: check type of arg, can't be unit
                     Soken::If => {
-                        // TODO: check type of arg, can't be unit
                         self.sexpect_clear(1);
                         self.create_scope(false, false); // don't know if reached
                     }
                     Soken::While => {
-                        self.sclear(); // remove COND (1 element)
+                        self.sexpect_clear(1);
                         self.create_scope(false, false); // don't know if reached
                     }
                     Soken::ScopeStart => self.create_scope(true, false), // basic scope
@@ -267,7 +265,7 @@ pub fn run<'a>(
                         let outer_scope_returns = scope.propogates_return && scope.returns;
                         self.scopes.pop();
 
-                        if self.scopes.len() > 0 {
+                        if !self.scopes.is_empty() {
                             // if at function
                             self.scopes.last_mut().unwrap().returns |= outer_scope_returns;
                         }

@@ -29,6 +29,8 @@ struct Lexer<'a> {
     identifier_to_int: HashMap<&'static str, IdentIdx>,
     token_idx_to_char_range: Vec<(usize, usize)>,
     start_char_idx: usize,
+    /// keep balanced delimiters ([{}]) correct
+    balanced_symbol_stack: Vec<char>,
 
     // constant members
     file_name: &'a str,
@@ -39,7 +41,7 @@ struct Lexer<'a> {
     single_char_repeatables: HashMap<char, Keyword>,
 }
 
-/// lexer
+/// initialize lexer datastructures(should be compiletime but...) and lex
 pub fn generate_tokens(
     content: &'static str,
     file_name: &str,
@@ -105,6 +107,7 @@ pub fn generate_tokens(
             identifier_to_int: HashMap::new(),
             token_idx_to_char_range: Vec::new(),
             start_char_idx: 0,
+            balanced_symbol_stack: Vec::new(),
 
             file_name,
             str_to_keyword,
@@ -183,6 +186,7 @@ impl<'a> Lexer<'a> {
         &self.source[self.start_char_idx..end]
     }
 
+    /// lex, but also check mismatched ({[...]})
     fn lex(&mut self) {
         while let Some((start_idx, ch)) = self.chars.next() {
             self.start_char_idx = start_idx;
@@ -226,6 +230,35 @@ impl<'a> Lexer<'a> {
                 // special characters like {}(),; that can be repeated without whitespace
                 _ if self.single_char_repeatables.contains_key(&ch) => {
                     // special characters that can be repeated without whitespace
+                    fn flip_delim(e: char) -> char {
+                        match e {
+                            '(' => ')',
+                            ')' => '(',
+                            '[' => ']',
+                            ']' => '[',
+                            '{' => '}',
+                            '}' => '{',
+                            _ => unreachable!(),
+                        }
+                    }
+                    match ch {
+                        '(' | '[' | '{' => self.balanced_symbol_stack.push(ch),
+                        ')' | ']' | '}' => match self.balanced_symbol_stack.pop() {
+                            Some(correct) => {
+                                let correct = flip_delim(correct);
+                                if ch != correct {
+                                    self.report_incorrect_syntax(&format!(
+                                        "bad delimiter, expected: {}",
+                                        correct
+                                    ));
+                                }
+                            }
+                            None => {
+                                self.report_incorrect_syntax("bad delimiting");
+                            }
+                        },
+                        _ => (),
+                    }
                     self.push(Token::Keyword(self.single_char_repeatables[&ch]));
                 }
                 // special math operators that can have names after them
@@ -248,7 +281,7 @@ impl<'a> Lexer<'a> {
                         }
                     }
                 }
-                // identifier or keyword
+                // identifier or keyword, must start with alphabetic, then can be more
                 _ if ch.is_alphabetic() => {
                     // Can either be a keyword or a variable name or a function name
                     while {

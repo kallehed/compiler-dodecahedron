@@ -8,6 +8,7 @@ fn main() {
         print_int(a + b + c);
     }
 
+
     if 0 {
         print_int(69);
     }

@@ -34,7 +34,6 @@ struct Lexer<'a> {
     balanced_delim_stack: Vec<(char, usize)>,
     /// string storage, tokens refer by idx to one of these
     str_storage: Vec<&'static str>,
-    ///
     int_storage: Vec<Int>,
 
     // constant members

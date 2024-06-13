@@ -1,5 +1,5 @@
 use crate::parser::Soken;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{parser::BinaryOp, IdentIdx, Int};
 
@@ -36,8 +36,8 @@ struct State<'b> {
 }
 
 // check correctness of program + constant folding
-pub fn to_c_code<'a>(
-    sokens: &'a [Soken],
+pub fn to_c_code(
+    sokens: &[Soken],
     ident_idx_to_string: &[&'static str],
     functions: &HashMap<IdentIdx, u16>,
     int_storage: &[Int],
@@ -163,12 +163,12 @@ impl State<'_> {
                 // initilize everything to 0
                 S::CreateVar(name) => {
                     self.sexpect(0);
-                    self.print(&format!("long {}=0;", self.var_name(name)));
+                    self.print(&format!("int64_t {}=0;", self.var_name(name)));
                 }
                 S::FuncDef(name) => {
                     self.sexpect(0);
-                    self.print_decl(&format!("long {}(", self.func_name(name)));
-                    self.print(&format!("long {}(", self.func_name(name)));
+                    self.print_decl(&format!("int64_t {}(", self.func_name(name)));
+                    self.print(&format!("int64_t {}(", self.func_name(name)));
                     let args = *self.functions.get(&name).unwrap();
                     for i in 0..args {
                         if i != 0 {
@@ -177,8 +177,8 @@ impl State<'_> {
                         }
                         match self.eat() {
                             Soken::Var(arg) => {
-                                self.print_decl(&format!("long {}", self.var_name(arg)));
-                                self.print(&format!("long {}", self.var_name(arg)));
+                                self.print_decl(&format!("int64_t {}", self.var_name(arg)));
+                                self.print(&format!("int64_t {}", self.var_name(arg)));
                             }
                             _ => unreachable!(),
                         }

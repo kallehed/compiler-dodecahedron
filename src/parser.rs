@@ -7,7 +7,7 @@ use crate::SetType;
 
 /// Binary operators with precedence as integer representation
 /// IMPORTANT: WHEN ADDING NEW BINOPS: CHANGE THE "from_number" FUNCTION!
-#[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd)]
 pub enum BinaryOp {
     // numbers specify their precedence. Higher is higher precedence
     // ZERO is RESERVED for algorithm, also -1 is reserved for no more operators
@@ -41,7 +41,7 @@ impl BinaryOp {
     }
 }
 /// Semantic Token
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Soken {
     /// used in ast verifyer to delete Soken's in constant propogation. Should not be used or referenced otherwise
     /// can be ignored in this file anyway

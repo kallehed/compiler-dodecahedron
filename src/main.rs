@@ -1,6 +1,8 @@
+use parser::Soken;
+
 // mod asm_backend;
 mod ast_verify;
-// mod c_backend;
+mod c_backend;
 mod lexer;
 mod parser;
 
@@ -84,9 +86,19 @@ fn main() {
         &token_idx_to_char_range,
         &mut int_storage,
     );
-    // TODO filter Nil from Sokens
-
     println!("After verifying: {:?}", sokens);
+    {
+        let total_sok_before_filter = sokens.len();
+        // TODO filter Nil from Sokens
+        let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();
+        let sokens: Vec<Soken> = sokens.into_iter().filter(|&e| Soken::Nil != e).collect();
+        println!("'\nAfter filtering Nil: {:?}", sokens);
+        println!(
+            "\n Nil generated: {}, {:.1}% of sokens",
+            nil_generated,
+            (nil_generated as f64 / total_sok_before_filter as f64) * 100.0
+        );
+    }
 
     //ast_interpreter::run_ast(&ast);
     /*{

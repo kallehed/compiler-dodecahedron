@@ -52,7 +52,7 @@ fn main() {
         .leak();
 
     println!(" \n--- STARTING LEXING!");
-    let (tokens, token_idx_to_char_range, ident_idx_to_string) =
+    let (tokens, token_idx_to_char_range, ident_idx_to_string, mut int_storage) =
         lexer::generate_tokens(source, file_name);
     println!("tokens: {:?}", tokens);
 
@@ -82,6 +82,7 @@ fn main() {
         source,
         file_name,
         &token_idx_to_char_range,
+        &mut int_storage,
     );
     // TODO filter Nil from Sokens
 

@@ -51,8 +51,8 @@ pub enum Soken {
 
     /// one
     Return,
-    /// standalone
-    Int(i64),
+    /// standalone, index into int_storage
+    Int(u16),
     /// standalone
     Var(IdentIdx),
     /// standalone

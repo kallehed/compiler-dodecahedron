@@ -1,4 +1,3 @@
-use core::panic;
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -12,8 +11,9 @@ use crate::COMMENT_PREFIX;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Token {
-    String(&'static str),
-    Int(Int),
+    // index into `str_storage` of Lexer
+    String(u16),
+    Int(u16),
     Keyword(Keyword),
     Identifier(IdentIdx),
 }
@@ -25,12 +25,17 @@ fn is_identifier_char(ch: char) -> bool {
 
 struct Lexer<'a> {
     chars: std::iter::Peekable<std::iter::Enumerate<std::str::Chars<'static>>>,
+    /// our append-only buffer
     tokens: Vec<Token>,
     identifier_to_int: HashMap<&'static str, IdentIdx>,
     token_idx_to_char_range: Vec<(usize, usize)>,
     start_char_idx: usize,
-    /// keep balanced delimiters ([{}]) correct
-    balanced_symbol_stack: Vec<char>,
+    /// keep balanced delimiters ([{}]) correct, usize is place for original delim
+    balanced_delim_stack: Vec<(char, usize)>,
+    /// string storage, tokens refer by idx to one of these
+    str_storage: Vec<&'static str>,
+    ///
+    int_storage: Vec<Int>,
 
     // constant members
     file_name: &'a str,
@@ -45,7 +50,7 @@ struct Lexer<'a> {
 pub fn generate_tokens(
     content: &'static str,
     file_name: &str,
-) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>) {
+) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>, Vec<Int>) {
     let mut lexer = {
         // these have to be seperated by whitespace
         let str_to_keyword: HashMap<&str, Keyword> = {
@@ -88,12 +93,13 @@ pub fn generate_tokens(
             set
         };
 
+        // Add [] later when needed
         let single_char_repeatables: HashMap<char, Keyword> = {
             let mut set = HashMap::new();
-            set.insert('{', Keyword::StartBlock);
-            set.insert('}', Keyword::EndBlock);
             set.insert('(', Keyword::StartParen);
             set.insert(')', Keyword::EndParen);
+            set.insert('{', Keyword::StartBlock);
+            set.insert('}', Keyword::EndBlock);
             set.insert(',', Keyword::Comma);
             set.insert(';', Keyword::EndStatement);
             set.insert(':', Keyword::TypeIncoming);
@@ -107,7 +113,9 @@ pub fn generate_tokens(
             identifier_to_int: HashMap::new(),
             token_idx_to_char_range: Vec::new(),
             start_char_idx: 0,
-            balanced_symbol_stack: Vec::new(),
+            balanced_delim_stack: Vec::new(),
+            str_storage: Vec::new(),
+            int_storage: Vec::new(),
 
             file_name,
             str_to_keyword,
@@ -125,6 +133,7 @@ pub fn generate_tokens(
         lexer.tokens,
         lexer.token_idx_to_char_range,
         identifier_idx_to_string,
+        lexer.int_storage,
     )
 }
 
@@ -132,6 +141,9 @@ impl<'a> Lexer<'a> {
     fn report_incorrect_syntax(&mut self, msg: &str) {
         let start_wher = self.start_char_idx;
         let end_wher = self.peek().0;
+        self.report_incorrect_syntax_at(msg, start_wher, end_wher);
+    }
+    fn report_incorrect_syntax_at(&mut self, msg: &str, start_wher: usize, end_wher: usize) {
         // TODO print better error message
         let mut line = 1;
         let mut col = 1;
@@ -181,6 +193,7 @@ impl<'a> Lexer<'a> {
         };
         self.push(Token::Identifier(idx));
     }
+    /// get the str from source that starts where you started and ends where you are (in lex)
     fn get_str(&mut self) -> &'static str {
         let end = self.peek().0;
         &self.source[self.start_char_idx..end]
@@ -204,7 +217,8 @@ impl<'a> Lexer<'a> {
                 '"' => {
                     while self.eat().1 != '"' {} // eat last
                     let s = self.get_str(); // TODO: this is actually probably wrong and will include the "" in the string
-                    self.push(Token::String(s));
+                    self.push(Token::String(self.str_storage.len().try_into().unwrap()));
+                    self.str_storage.push(s); // correct order here is important
                 }
                 // parse number
                 _ if ch.is_numeric() => {
@@ -224,7 +238,8 @@ impl<'a> Lexer<'a> {
 
                     let num_str = self.get_str();
                     let num = num_str.parse::<_>().unwrap();
-                    self.push(Token::Int(num));
+                    self.push(Token::Int(self.int_storage.len().try_into().unwrap()));
+                    self.int_storage.push(num);
                 }
 
                 // special characters like {}(),; that can be repeated without whitespace
@@ -242,15 +257,19 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     match ch {
-                        '(' | '[' | '{' => self.balanced_symbol_stack.push(ch),
-                        ')' | ']' | '}' => match self.balanced_symbol_stack.pop() {
+                        '(' | '[' | '{' => self.balanced_delim_stack.push((ch, start_idx)),
+                        ')' | ']' | '}' => match self.balanced_delim_stack.pop() {
                             Some(correct) => {
-                                let correct = flip_delim(correct);
-                                if ch != correct {
-                                    self.report_incorrect_syntax(&format!(
-                                        "bad delimiter, expected: {}",
-                                        correct
-                                    ));
+                                let correct_ch = flip_delim(correct.0);
+                                if ch != correct_ch {
+                                    self.report_incorrect_syntax_at(
+                                        &format!(
+                                            "This delimiter not closed properly. Needs {} but found {}",
+                                            correct_ch, ch
+                                        ),
+                                        correct.1,
+                                        correct.1 + 1,
+                                    );
                                 }
                             }
                             None => {
@@ -302,11 +321,13 @@ impl<'a> Lexer<'a> {
                 }
                 // other characters
                 _ => {
-                    panic!("unrecognized character: {}", ch);
+                    self.report_incorrect_syntax(&format!(
+                        "Unrecognized character: `{}`, not part of grammar",
+                        ch
+                    ));
                 }
             }
         }
-
         println!("idents: {:?}", self.identifier_to_int);
     }
 }

@@ -73,7 +73,7 @@ fn main() {
         }
     }
 
-    println!("\n FINAL AST: {:?}", sokens);
+    println!("\n FINAL AST: {:?}", &sokens);
 
     println!("\n--- Type check AST: \n");
     ast_verify::run(
@@ -86,33 +86,30 @@ fn main() {
         &token_idx_to_char_range,
         &mut int_storage,
     );
-    println!("After verifying: {:?}", sokens);
-    {
-        let total_sok_before_filter = sokens.len();
-        // TODO filter Nil from Sokens
-        let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();
-        let sokens: Vec<Soken> = sokens.into_iter().filter(|&e| Soken::Nil != e).collect();
-        println!("'\nAfter filtering Nil: {:?}", sokens);
-        println!(
-            "\n Nil generated: {}, {:.1}% of sokens",
-            nil_generated,
-            (nil_generated as f64 / total_sok_before_filter as f64) * 100.0
-        );
-    }
-
-    //ast_interpreter::run_ast(&ast);
-    /*{
-    let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string);
-
-    println!("\n--- Now printing C code: \n");
-    println!("{}", c_code);
+    println!("After verifying: {:?}", &sokens);
+    let total_sok_before_filter = sokens.len();
+    // TODO filter Nil from Sokens
+    let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();
+    let sokens: Vec<Soken> = sokens.into_iter().filter(|&e| Soken::Nil != e).collect();
+    println!("'\nAfter filtering Nil: {:?}", &sokens);
+    println!(
+        "\n Nil generated: {}, {:.1}% of sokens",
+        nil_generated,
+        (nil_generated as f64 / total_sok_before_filter as f64) * 100.0
+    );
 
     {
-        use std::io::Write;
-        let mut file = std::fs::File::create("out.c").unwrap();
-        file.write_all(c_code.as_bytes()).unwrap();
+        let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string, &functions, &int_storage);
+
+        println!("\n--- Now printing C code: \n");
+        println!("{}", c_code);
+
+        {
+            use std::io::Write;
+            let mut file = std::fs::File::create("out.c").unwrap();
+            file.write_all(c_code.as_bytes()).unwrap();
+        }
     }
-    })) */
 
     // generate assembly (NASM)
     /*{

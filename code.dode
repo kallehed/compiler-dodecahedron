@@ -13,26 +13,27 @@ fn main() {
     fibb(2+3*3,3,2+1+1+1+1);
     let a = 3434;
 
-    return 34;
 
     if 34 {
         print_int(233);
         let x =  4;
     }
     let x = 34;
-    return x == 2;
 
     fibb(1000000, 0, 1);
     print_zeroes(5);
     #let x = 1 + (x = 3);
+    if x == 3 {}
 
     let b = 1;
     while b < 10 {
         print_int(factorial(b));
         b += 1;
     }
-    return 69;
     print_zeroes(3);
+    # expensive
+    print_int(rec_fibb(40));
+    return 69;
 
 }
 
@@ -54,6 +55,16 @@ fn print_zeroes(n) {
         print_int(0);
     }
     return 0;
+}
+
+fn rec_fibb(n) {
+    if n == 0 {
+        return 0;
+    }
+    if n == 1 {
+        return 1;
+    }
+    return rec_fibb(n-1) +  rec_fibb(n-2);
 }
 
 fn fibb(n, start, start2) {

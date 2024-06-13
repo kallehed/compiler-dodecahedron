@@ -69,7 +69,7 @@ FORM: [{] [STAT]... [}]
 RETURN:
 return 1+2*3;
 ->   [2][3][*][1][+][ret]       one statement
-FORM: [Int] [RETURN]
+FORM: [EXPR] [RETURN]
 
 WHILE:
 while 1 {g(2);}

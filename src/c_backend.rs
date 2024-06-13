@@ -3,68 +3,70 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{parser::BinaryOp, IdentIdx, Int};
 
+#[derive(Clone, Copy)]
+enum StackItem {
+    /// index into int storage
+    Int(u16),
+    /// Variable name
+    Var(IdentIdx),
+    /// binop, index of first arg, second will be left neighbor of first
+    Binop(BinaryOp, u16),
+    /// fn name and where the args start (then go to the left to get args in right order)
+    /// you can get nr of args from the name
+    FnCall(IdentIdx, u16),
+}
+
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
 struct State<'b> {
-    /// holds indexes into buffer and their lengths
-    stack: Vec<(usize, usize)>,
+    /// holds values that the stack refers to
+    refer_exprs: Vec<StackItem>,
+    /// holds values that soon will be placed on `refer_exprs`
+    stack: Vec<StackItem>,
     sokens: &'b [Soken],
     si: SokIdx,
 
     c_declarations: String,
     c_code: String,
-    /// holdds intermediate expression strings
-    buffer: String,
 
     // constant
-    int_storage: &'b Vec<Int>,
+    int_storage: &'b [Int],
     functions: &'b HashMap<IdentIdx, u16>,
     ident_idx_to_string: &'b [&'static str],
-    source: &'b str,
-    file_name: &'b str,
-    token_idx_to_char_range: &'b [(usize, usize)],
 }
 
 // check correctness of program + constant folding
-pub fn run<'a>(
-    sokens: &'a mut [Soken],
+pub fn to_c_code<'a>(
+    sokens: &'a [Soken],
     ident_idx_to_string: &[&'static str],
     functions: &HashMap<IdentIdx, u16>,
-    source: &'a str,
-    file_name: &'a str,
-    token_idx_to_char_range: &[(usize, usize)],
-    int_storage: &mut Vec<Int>,
-) {
+    int_storage: &[Int],
+) -> String {
     let mut s = State {
+        refer_exprs: Vec::new(),
         stack: Vec::new(),
         sokens,
         si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
 
-        c_declarations: String::new(),
+        c_declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
         c_code: String::new(),
-        buffer: String::new(),
 
         int_storage,
         functions,
         ident_idx_to_string,
-        source,
-        file_name,
-        token_idx_to_char_range,
     };
-    s.verify();
+    s.gen_c();
+
+    s.c_declarations.push_str(&s.c_code);
+    s.c_declarations
 }
 
 impl State<'_> {
-    /// stack pop, get item, and where it originated from sokens
-    fn spop(&mut self) -> &str {
+    fn spop(&mut self) -> StackItem {
         self.stack.pop().unwrap()
     }
-    /// stack push item, including `i`, soken index it comes from
-    fn spush(&mut self, it: &str) {
-        self.stack.push(it);
-    }
-    fn sclear(&mut self) {
-        self.stack.clear();
+    fn spush(&mut self, e: StackItem) {
+        self.stack.push(e);
     }
     fn eat(&mut self) -> Soken {
         self.si.0 = self.si.0.wrapping_add(1);
@@ -74,182 +76,168 @@ impl State<'_> {
     fn sexpect(&mut self, items: usize) {
         if self.stack.len() != items {
             println!();
-            self.report_error(&format!(
-                "got {} stackitems, but wants {}",
-                self.stack.len(),
-                items
-            ));
+            println!("got {} stackitems, but wants {}", self.stack.len(), items);
         }
-    }
-    fn sexpect_clear(&mut self, items: usize) {
-        self.sexpect(items);
-        self.sclear();
     }
     fn print(&mut self, s: &str) {
         self.c_code.push_str(s);
     }
+    fn print_decl(&mut self, s: &str) {
+        self.c_declarations.push_str(s);
+    }
+    fn binop_to_c_name(&self, op: BinaryOp) -> &'static str {
+        use BinaryOp as B;
+        match op {
+            B::SetAdd => "+=",
+            B::SetSub => "-=",
+            B::Set => "=",
+            B::Eql => "==",
+            B::Les => "<",
+            B::Mor => ">",
+            B::Add => "+",
+            B::Sub => "-",
+            B::Mul => "*",
+        }
+    }
+    /// crazy function, must look at first element of stack, and recursively
+    /// do inorder traversal of the ref vec, this can be done in a loop,
+    /// but easy recursive version first
     fn print_first_on_stack(&mut self) {
         let e = self.stack.pop().unwrap();
-        self.print(e);
+        recurse(self, e);
+        use StackItem as SI;
+        fn recurse(s: &mut State, e: SI) {
+            match e {
+                SI::Int(istor) => s.print(&s.int_storage[istor as usize].to_string()),
+                SI::Var(ident) => s.print(&s.var_name(ident)),
+                SI::Binop(binop, left_idx) => {
+                    s.print("(");
+                    recurse(s, s.refer_exprs[left_idx as usize]);
+                    s.print(s.binop_to_c_name(binop));
+                    recurse(s, s.refer_exprs[(left_idx - 1) as usize]);
+                    s.print(")");
+                }
+                SI::FnCall(name, mut fst_arg_idx) => {
+                    s.print(&s.func_name(name));
+                    s.print("(");
+                    let nbr_args = s.functions[&name];
+                    for i in 0..nbr_args {
+                        if i != 0 {
+                            s.print(",")
+                        }
+                        recurse(s, s.refer_exprs[fst_arg_idx as usize]);
+                        fst_arg_idx = fst_arg_idx.wrapping_sub(1);
+                    }
+                    s.print(")");
+                }
+            }
+        }
     }
     fn var_name(&self, name: IdentIdx) -> String {
         format!("var{}", name)
     }
     fn func_name(&self, name: IdentIdx) -> String {
-        format!("func{}", name)
+        let real_name = self.ident_idx_to_string[name as usize];
+        match real_name {
+            "print_int" => "print_int".to_string(),
+            "main" => "main".to_string(),
+            _ => format!("func{}", name),
+        }
     }
-    fn verify(&mut self) {
-        // for each scope, we have a vec cataloging the variables that exist, makes poping easier
+
+    fn gen_c(&mut self) {
         loop {
+            use Soken as S;
             match self.eat() {
-                Soken::EndStat => {
-                    self.sexpect(0);
+                S::EndStat => {
+                    self.sexpect(1);
                     self.print_first_on_stack();
                     self.print(";");
                 }
-                Soken::Return => {
+                S::Return => {
                     self.sexpect(1);
                     self.print("return ");
                     self.print_first_on_stack();
                     self.print(";");
                 }
                 // initilize everything to 0
-                Soken::CreateVar(name) => {
+                S::CreateVar(name) => {
                     self.sexpect(0);
                     self.print(&format!("long {}=0;", self.var_name(name)));
                 }
-                Soken::FuncDef(name) => {
+                S::FuncDef(name) => {
                     self.sexpect(0);
+                    self.print_decl(&format!("long {}(", self.func_name(name)));
                     self.print(&format!("long {}(", self.func_name(name)));
                     let args = *self.functions.get(&name).unwrap();
-                    for _ in 0..args {
+                    for i in 0..args {
+                        if i != 0 {
+                            self.print(",");
+                            self.print_decl(",");
+                        }
                         match self.eat() {
                             Soken::Var(arg) => {
-                                self.print(&format!("{},", self.var_name(arg)));
+                                self.print_decl(&format!("long {}", self.var_name(arg)));
+                                self.print(&format!("long {}", self.var_name(arg)));
                             }
                             _ => unreachable!(),
                         }
                     }
+                    self.print_decl(");");
                     self.print("){");
                 }
-                // TODO: check type of arg, can't be unit
-                Soken::If => {
+                S::If => {
                     self.sexpect(1);
                     self.print("if (");
                     self.print_first_on_stack();
                     self.print("){");
                 }
-                Soken::While => {
+                S::While => {
                     self.sexpect(1);
                     self.print("while (");
                     self.print_first_on_stack();
                     self.print("){");
                 }
-                Soken::ScopeStart => {
+                S::ScopeStart => {
                     self.sexpect(0);
                     self.print("{");
-                } // basic scope
-                // remove the variables that were in the scope from the global vars
-                Soken::ScopeEnd => {
+                }
+                S::ScopeEnd => {
                     self.sexpect(0);
                     self.print("}");
                 }
                 // HERE BEGINS EXPR SOKENS
-                Soken::Int(intstor) => {
-                    let theint = self.int_storage[intstor as usize];
-                    let string_version = theint.to_string();
-                    let start = self.buffer.len();
-                    let len = string_version.len();
-                    self.buffer.push_str(&string_version);
-                    self.stack.push((start, len));
+                S::Int(intstor) => {
+                    self.spush(StackItem::Int(intstor));
                 }
-                // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
-                Soken::Var(e) => {
-                    if !self.vars.contains(&e) {
-                        self.report_error("Variable used before declaration");
-                    }
-                    self.spush(StackItem::Var);
+                S::Var(e) => {
+                    self.spush(StackItem::Var(e));
                 }
-
                 // CALL to ALREADY EXISTING function
-                Soken::FuncCall(name, supposed_args) => {
-                    // make sure function called with correct nr of arguments
-                    if let Some(&args) = self.functions.get(&name) {
-                        if args != supposed_args {
-                            self.report_error(&format!(
-                                "Function should be called with {} arg(s), got {}",
-                                args, supposed_args
-                            ));
-                        }
-                    } else {
-                        self.report_error("Function does not exist");
+                S::FuncCall(name, supposed_args) => {
+                    for _ in 0..supposed_args {
+                        let item = self.spop();
+                        self.refer_exprs.push(item);
                     }
-                    self.sclear(); // drop elements of stack
-                    self.spush(StackItem::UnkownInt); // add unknown stack element, because we don't know what the function returns
+                    // take -1 from len to get last one
+                    let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
+                    let fst_arg_idx = fst_arg_idx.overflowing_sub(1).0;
+                    self.spush(StackItem::FnCall(name, fst_arg_idx));
+                    // function with no args could possibly get u16::MAX, but that's fine because we won't take any args anyway
                 }
-                // make sure that setters have a left l-value,
-                // if regular binop, constant propogate ints
-                Soken::Binop(binop) => {
-                    // self.sexpect(2, "binop needs two values");
-                    let right = self.spop();
-                    let left = self.spop();
-                    // TODO: DRY the code
-                    match left.0 {
-                        StackItem::LitInt | StackItem::UnkownInt | StackItem::Var => (),
-                        StackItem::Unit => self.report_error("Can't do binop on Unit"),
+                S::Binop(binop) => {
+                    // put both on refer exprs
+                    for _ in 0..2 {
+                        let aaa = self.spop();
+                        self.refer_exprs.push(aaa);
                     }
-                    match right.0 {
-                        StackItem::LitInt | StackItem::UnkownInt | StackItem::Var => (),
-                        StackItem::Unit => self.report_error("Can't do binop on Unit"),
-                    }
-                    use BinaryOp as B;
-                    match binop {
-                        B::SetAdd | B::SetSub | B::Set => {
-                            // `left` has to be ident, ERROR
-                            if let StackItem::Var = left.0 {
-                                self.spush(StackItem::Unit); // setting returns Unit
-                            } else {
-                                self.report_error( "Left hand side of setter can't be expression, must be variable name")
-                            }
-                        }
-                        B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
-                            // constant propogation
-                            if let (StackItem::LitInt, StackItem::LitInt) = (left.0, right.0) {
-                                // get values
-                                let l_intstor = match self.sokens[left.1 .0] {
-                                    Soken::Int(e) => e,
-                                    _ => unreachable!(),
-                                };
-                                let r_intstor = match self.sokens[right.1 .0] {
-                                    Soken::Int(e) => e,
-                                    _ => unreachable!(),
-                                };
-                                let l = self.int_storage[l_intstor as usize];
-                                let r = self.int_storage[r_intstor as usize];
-                                // bc rust semantics we do wrapping_add etc
-                                let res = match binop {
-                                    B::Eql => (l == r) as i64,
-                                    B::Les => (l < r) as i64,
-                                    B::Mor => (l > r) as i64,
-                                    B::Add => l.wrapping_add(r),
-                                    B::Sub => l.wrapping_sub(r),
-                                    B::Mul => l.wrapping_mul(r),
-                                    _ => unreachable!(),
-                                };
-                                self.sokens[left.1 .0] = Soken::Nil;
-                                self.sokens[right.1 .0] = Soken::Nil;
-                                // replace left int_storage with new value
-                                self.int_storage[l_intstor as usize] = res;
-                                self.sokens[self.si.0] = Soken::Int(l_intstor); // propogation
-                                self.spush(StackItem::LitInt);
-                            } else {
-                                self.spush(StackItem::UnkownInt); // one is either unknown or variable -> Var
-                            }
-                        }
-                    }
+                    // on stack, but the binop, looking at top of refer_exprs
+                    let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
+                    let fst_arg_idx = fst_arg_idx.overflowing_sub(1).0;
+                    self.spush(StackItem::Binop(binop, fst_arg_idx));
                 }
-                Soken::Nil => {
-                    unreachable!("ast won't contain nil after parsing, so impossible")
+                S::Nil => {
+                    unreachable!("ast won't contain nil as they were filtered after ast_verify")
                 }
             }
             // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
@@ -257,18 +245,5 @@ impl State<'_> {
                 break;
             }
         }
-    }
-    fn report_error_on_token_idx(&mut self, msg: &str, si: SokIdx) -> ! {
-        crate::mark_error_in_source(
-            self.source,
-            self.file_name,
-            msg,
-            self.token_idx_to_char_range[self.origins[si.0]],
-        );
-        std::process::exit(1);
-    }
-    // implcitily reports on current soken idx
-    fn report_error(&mut self, msg: &str) -> ! {
-        self.report_error_on_token_idx(msg, self.si);
     }
 }

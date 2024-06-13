@@ -46,6 +46,7 @@ struct State<'b> {
 
     // constant
     functions: &'b HashMap<IdentIdx, u16>,
+    /// TODO: use this for better err msgs
     ident_idx_to_string: &'b [&'static str],
     source: &'b str,
     file_name: &'b str,
@@ -101,9 +102,6 @@ impl State<'_> {
     fn spush(&mut self, it: StackItem) {
         self.stack.push((it, self.si));
     }
-    fn sclear(&mut self) {
-        self.stack.clear();
-    }
     fn create_scope(&mut self, propogates_return: bool, must_return: bool) {
         self.scopes.push(Scope {
             returns: false,
@@ -129,7 +127,14 @@ impl State<'_> {
     }
     fn sexpect_clear(&mut self, items: usize) {
         self.sexpect(items);
-        self.sclear();
+        self.stack.clear();
+    }
+    fn sexpect_int_clear(&mut self, msg: &str) {
+        self.sexpect(1);
+        let ret_val = self.spop();
+        if let StackItem::Unit = ret_val.0 {
+            self.report_error(msg);
+        }
     }
     /// What it does:
     /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
@@ -141,7 +146,6 @@ impl State<'_> {
     /// *- calls to nonexistent functions caught
     /// - variables not (used before declaration, declared more than once)
     /// - verify that you aren't doing things like x = (x = 3);
-    /// TODO-FIX: can't to return x = 3;
     fn verify(&mut self) {
         // for each scope, we have a vec cataloging the variables that exist, makes poping easier
         loop {
@@ -149,13 +153,8 @@ impl State<'_> {
                 Soken::EndStat => {
                     self.sexpect_clear(1); // throw away 1 stack item
                 }
-                // TODO: expr has to be int
                 Soken::Return => {
-                    self.sexpect(1);
-                    let ret_val = self.spop();
-                    if let StackItem::Unit = ret_val.0 {
-                        self.report_error("Can't return Unit");
-                    }
+                    self.sexpect_int_clear("Return value must be Int");
                     // signal that this scope returns
                     self.scopes.last_mut().unwrap().returns = true;
                 }
@@ -169,7 +168,6 @@ impl State<'_> {
                     self.sexpect(0);
                     self.create_scope(false, true); // false bc outer scope is weird
                     let args = *self.functions.get(&name).unwrap();
-                    // add to scope, must not shadow, TODO
                     for _ in 0..args {
                         match self.eat() {
                             Soken::Var(arg) => {
@@ -179,13 +177,12 @@ impl State<'_> {
                         }
                     }
                 }
-                // TODO: check type of arg, can't be unit
                 Soken::If => {
-                    self.sexpect_clear(1);
+                    self.sexpect_int_clear("If condition must be Int");
                     self.create_scope(false, false); // don't know if reached
                 }
                 Soken::While => {
-                    self.sexpect_clear(1);
+                    self.sexpect_int_clear("While condition must be Int");
                     self.create_scope(false, false); // don't know if reached
                 }
                 Soken::ScopeStart => {
@@ -234,7 +231,10 @@ impl State<'_> {
                     } else {
                         self.report_error("Function does not exist");
                     }
-                    self.sclear(); // drop elements of stack
+                    // drop supposed_args amount of arguments
+                    for _ in 0..supposed_args {
+                        self.spop();
+                    }
                     self.spush(StackItem::UnkownInt); // add unknown stack element, because we don't know what the function returns
                 }
                 // make sure that setters have a left l-value,
@@ -308,6 +308,7 @@ impl State<'_> {
             }
         }
     }
+
     fn report_error_on_token_idx(&mut self, msg: &str, si: SokIdx) -> ! {
         crate::mark_error_in_source(
             self.source,

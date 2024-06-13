@@ -87,6 +87,7 @@ fn main() {
         &mut int_storage,
     );
     println!("After verifying: {:?}", &sokens);
+    eprintln!("nbr of sokens: {}", sokens.len());
     let total_sok_before_filter = sokens.len();
     // TODO filter Nil from Sokens
     let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();

@@ -102,6 +102,7 @@ impl State<'_> {
     /// crazy function, must look at first element of stack, and recursively
     /// do inorder traversal of the ref vec, this can be done in a loop,
     /// but easy recursive version first
+    /// TODO: make not recursive
     fn print_first_on_stack(&mut self) {
         let e = self.stack.pop().unwrap();
         recurse(self, e);

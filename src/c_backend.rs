@@ -3,34 +3,17 @@ use std::collections::HashMap;
 
 use crate::{parser::BinaryOp, IdentIdx};
 
-#[derive(Clone, Copy)]
-enum StackItem {
-    /// index into int storage
-    Int(u16),
-    /// Variable name
-    Var(IdentIdx),
-    /// binop, index of first arg, second will be left neighbor of first
-    Binop(BinaryOp, u16),
-    /// fn name and where the args start (then go to the left to get args in right order)
-    /// you can get nr of args from the name
-    FnCall(IdentIdx, u16),
-}
-
 use crate::lexer::IntStor;
 
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
 struct State<'b> {
-    /// holds values that the stack refers to
-    refer_exprs: Vec<StackItem>,
-    /// holds values that soon will be placed on `refer_exprs`
-    stack: Vec<StackItem>,
     sokens: &'b [Soken],
     si: SokIdx,
+    stack: Vec<String>,
 
     c_declarations: String,
     c_code: String,
-
     // constant
     int_stor: &'b IntStor,
     functions: &'b HashMap<IdentIdx, u16>,
@@ -45,14 +28,12 @@ pub fn to_c_code(
     int_stor: &IntStor,
 ) -> String {
     let mut s = State {
-        refer_exprs: Vec::new(),
-        stack: Vec::new(),
         sokens,
         si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
+        stack: Vec::new(),
 
         c_declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
         c_code: String::new(),
-
         int_stor,
         functions,
         ident_idx_to_string,
@@ -68,11 +49,10 @@ impl State<'_> {
         self.si.0 = self.si.0.wrapping_add(1);
         self.sokens[self.si.0]
     }
-
-    fn spop(&mut self) -> StackItem {
+    fn spop(&mut self) -> String {
         self.stack.pop().unwrap()
     }
-    fn spush(&mut self, e: StackItem) {
+    fn spush(&mut self, e: String) {
         self.stack.push(e);
     }
     /// internal logic assertion on nbr of items on stack
@@ -110,81 +90,6 @@ impl State<'_> {
             B::Mul => "*",
         }
     }
-    /// crazy function, must look at first element of stack, and recursively
-    /// do inorder traversal of the ref vec, this can be done in a loop,
-    /// but easy recursive version first
-    /// TODO: make not recursive
-    fn print_first_on_stack1(&mut self) {
-        self.sexpect(1); // we only do this when have one thing on stack
-        let e = self.spop();
-        recurse(self, e);
-        use StackItem as SI;
-        fn recurse(s: &mut State, e: SI) {
-            match e {
-                SI::Int(at) => s.print(&s.int_stor.get(at).to_string()),
-                SI::Var(ident) => s.print(&s.var_name(ident)),
-                SI::Binop(binop, left_idx) => {
-                    s.print("(");
-                    recurse(s, s.refer_exprs[left_idx as usize]);
-                    s.print(s.binop_to_c_name(binop));
-                    recurse(s, s.refer_exprs[(left_idx - 1) as usize]);
-                    s.print(")");
-                }
-                SI::FnCall(name, mut fst_arg_idx) => {
-                    s.print(&s.func_name(name));
-                    s.print("(");
-                    let nbr_args = s.functions[&name];
-                    for i in 0..nbr_args {
-                        if i != 0 {
-                            s.print(",")
-                        }
-                        recurse(s, s.refer_exprs[fst_arg_idx as usize]);
-                        fst_arg_idx = fst_arg_idx.wrapping_sub(1);
-                    }
-                    s.print(")");
-                }
-            }
-        }
-    }
-    /// fun try to make print_first_on_stack not use recursion
-    fn print_first_on_stack(&mut self) {
-        self.sexpect(1);
-        let mut stack = Vec::new();
-        stack.push(I::SI(self.stack.pop().unwrap()));
-        enum I {
-            SI(StackItem),
-            Print(&'static str),
-        }
-        while let Some(e) = stack.pop() {
-            match e {
-                I::SI(StackItem::Int(e)) => self.print(&self.int_stor.get(e).to_string()),
-                I::SI(StackItem::Var(e)) => self.print(&self.var_name(e)),
-                I::SI(StackItem::Binop(binop, fst_arg)) => {
-                    stack.push(I::Print(")"));
-                    stack.push(I::SI(self.refer_exprs[fst_arg as usize - 1]));
-                    stack.push(I::Print(self.binop_to_c_name(binop)));
-                    stack.push(I::SI(self.refer_exprs[fst_arg as usize]));
-                    self.print("(");
-                }
-                I::SI(StackItem::FnCall(name, fst_arg)) => {
-                    let args = self.functions[&name];
-                    let mut at = (fst_arg + 1) - args;
-                    stack.push(I::Print(")"));
-                    for i in 0..args {
-                        if i != 0 {
-                            stack.push(I::Print(","));
-                        }
-                        stack.push(I::SI(self.refer_exprs[at as usize]));
-                        at += 1;
-                    }
-                    self.print(&self.func_name(name));
-                    self.print("(");
-                }
-                I::Print(e) => self.print(e),
-            }
-        }
-    }
-
     fn var_name(&self, name: IdentIdx) -> String {
         format!("var{}", name)
     }
@@ -196,7 +101,11 @@ impl State<'_> {
             _ => format!("func{}", name),
         }
     }
-
+    fn print_first_on_stack(&mut self) {
+        self.sexpect(1);
+        let e = self.stack.pop().unwrap();
+        self.print(&e);
+    }
     fn gen_c(&mut self) {
         loop {
             use Soken as S;
@@ -252,31 +161,37 @@ impl State<'_> {
                     self.print("}");
                 }
                 // HERE BEGINS EXPR SOKENS
-                S::Int(intstor) => self.spush(StackItem::Int(intstor)),
-                S::Var(e) => self.spush(StackItem::Var(e)),
+                S::Int(intstor) => self.spush(self.int_stor.get(intstor).to_string()),
+                S::Var(e) => self.spush(self.var_name(e)),
 
                 // CALL to ALREADY EXISTING function
                 S::FuncCall(name, supposed_args) => {
+                    let mut res = String::new();
+                    res.push_str(&self.func_name(name));
+                    res.push('(');
+                    let mut args = Vec::new();
                     for _ in 0..supposed_args {
-                        let item = self.spop();
-                        self.refer_exprs.push(item);
+                        args.push(self.spop());
                     }
-                    // take -1 from len to get last one
-                    let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
-                    let fst_arg_idx = fst_arg_idx.overflowing_sub(1).0;
-                    self.spush(StackItem::FnCall(name, fst_arg_idx));
-                    // function with no args could possibly get u16::MAX (only in super special case though), but that's fine because we won't take any args anyway
+                    for (i, arg) in args.into_iter().enumerate() {
+                        res.push_str(&arg);
+                        if i as u16 == supposed_args - 1 {
+                            break;
+                        }
+                        res.push(',');
+                    }
+                    res.push(')');
+                    self.spush(res);
                 }
                 S::Binop(binop) => {
-                    // put both on refer exprs
-                    for _ in 0..2 {
-                        let e = self.spop();
-                        self.refer_exprs.push(e);
-                    }
-                    // on stack, but the binop, looking at top of refer_exprs
-                    let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
-                    let fst_arg_idx = fst_arg_idx.overflowing_sub(1).0;
-                    self.spush(StackItem::Binop(binop, fst_arg_idx));
+                    let right = self.spop();
+                    let left = self.spop();
+                    let mut res = String::from("(");
+                    res.push_str(&left);
+                    res.push_str(self.binop_to_c_name(binop));
+                    res.push_str(&right);
+                    res.push(')');
+                    self.spush(res);
                 }
                 S::Nil => {
                     unreachable!("ast won't contain nil as they were filtered after ast_verif")

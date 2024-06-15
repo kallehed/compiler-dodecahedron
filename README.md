@@ -23,6 +23,17 @@ TODO: Don't allow nested functions, right now: bad behaviour.
 TODO: Better errors, be able to show 2 locations (use when bad delimiters, also when no return)
 TOOD: maybe use Default more, but doesn't work when you can't default all the fields (can't default some iterator)
 
+# Things to think about:
+How should the Soken's be iterated? Should I create some sort of abstraction around it to make the verifyer and the c backend simpler? But I don't want to lose performance, also don't want to lose readability of code (sequentiallity), though readability already suffers a bit from reverse polish notation style expressions.
+
+How should the c backend concatinate expressions to produce a string C can understand? I have made 3 implementations: Bad slow 1 million String impl | Put everything on stack -> (Put stuff on another stack and iterate | recurse over items, where dependencies have been written in) (the one without any recursion is most lines)
+
+Should the parser be de-recursified? Maybe could put all actions to do on a stack, though this would maybe make it overall less readable AND increase line-count. Could try an implementation.
+
+Instead of doing a bunch of stuff with the Soken's, maybe I should generate an IR. It could be 4 item IR like: `a = b 'op' c`. Set register to op of two registers.
+Problem: don't know how to call functions? Function call could specify at which register they begin, but seems weird, would also be weird if function call was variable length, though maybe could store that in separate buffer (which register values function is called with)
+Something like f(1+2,3) would be converted to $0 = i64 1; $1 = i64 2; $2 = $0 + $1; $3 = i64 3; call f with $2,$3, could have table that says which f uses, or we could create 2 more registers: $4 = $2, $5 = $3, and do `call f start at $4`, and we would know to use $4 and %5. (This example is dumb because in the original the registers get next to each other). We could also delay the setting of the registers to not have to create 2 new registers. So we do: $0 = i64 1; $1 = i64 2; THEN: $2 = $0 + $1; $3 = i64 3; call f from $2. Though this seems harder to implement, because have to wait for everything to evaluate to next-to-last, before setting last to register. So would have to have a stack or something. IMPORTANT: Don't overthink with structs, complicated stuff THIS LANGUAGE ONLY HAS i64!
+
 # How to run the things:
 Compile when change:
 

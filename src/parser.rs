@@ -196,6 +196,22 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         );
         self.push(Soken::ScopeEnd, p);
     }
+    // expects semicolon and pushes EndStat Soken
+    fn require_semicolon(&mut self, push: bool) {
+        let place = eat_require!(
+            self,
+            Token::Keyword(Keyword::EndStatement),
+            "statement must end with `;`"
+        );
+        if push {
+            self.push(Soken::EndStat, place);
+        }
+    }
+    /// add new semantic token, which was found at place
+    fn push(&mut self, soken: Soken, place: usize) {
+        self.sokens.push(soken);
+        self.origins.push(place);
+    }
 
     /// Parse generalized tokens. Probably statements. If finds }, doesn't eat. Also ends at end of tokens
     /// Variable name => Set it to expression, If => generate If node
@@ -313,22 +329,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         }
     }
 
-    // expects semicolon and pushes EndStat Soken
-    fn require_semicolon(&mut self, push: bool) {
-        let place = eat_require!(
-            self,
-            Token::Keyword(Keyword::EndStatement),
-            "statement must end with `;`"
-        );
-        if push {
-            self.push(Soken::EndStat, place);
-        }
+    /// doesn't eat end of expression
+    fn parse_expr(&mut self) {
+        // TODO: add prefix unary operator parsing here
+        self.parse_primary();
+        self.parse_binop_and_right(0)
     }
-    /// add new semantic token, which was found at place
-    fn push(&mut self, soken: Soken, place: usize) {
-        self.sokens.push(soken);
-        self.origins.push(place);
-    }
+
     fn parse_primary(&mut self) {
         let (p, &token) = self.eat();
         let soken = match token {
@@ -384,13 +391,6 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         }
         self.eat(); // eat end paren
         args
-    }
-
-    /// doesn't eat end of expression
-    fn parse_expr(&mut self) {
-        // TODO: add prefix unary operator parsing here
-        self.parse_primary();
-        self.parse_binop_and_right(0)
     }
 
     fn parse_binop_and_right(&mut self, prev_prec: BinOpPrec) {

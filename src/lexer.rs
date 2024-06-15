@@ -161,10 +161,9 @@ pub fn generate_tokens(
         identifier_idx_to_string[ident as usize] = string;
     }
 
-    if !lexer.balanced_delim_stack.is_empty() {
-        for &bal_del in lexer.balanced_delim_stack.iter() {
-            lexer.report_incorrect_syntax_at("Delimiter not closed", bal_del.1, bal_del.1 + 1);
-        }
+    // TODO: Check if it is best to error on first unclosed delimiter
+    if let Some(&bal_del) = lexer.balanced_delim_stack.first() {
+        lexer.report_incorrect_syntax_at("Delimiter not closed", bal_del.1, bal_del.1 + 1);
     }
 
     (

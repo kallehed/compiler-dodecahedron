@@ -114,9 +114,9 @@ impl State<'_> {
     /// do inorder traversal of the ref vec, this can be done in a loop,
     /// but easy recursive version first
     /// TODO: make not recursive
-    fn print_first_on_stack(&mut self) {
+    fn print_first_on_stack1(&mut self) {
         self.sexpect(1); // we only do this when have one thing on stack
-        let e = self.stack.pop().unwrap();
+        let e = self.spop();
         recurse(self, e);
         use StackItem as SI;
         fn recurse(s: &mut State, e: SI) {
@@ -146,6 +146,45 @@ impl State<'_> {
             }
         }
     }
+    /// fun try to make print_first_on_stack not use recursion
+    fn print_first_on_stack(&mut self) {
+        self.sexpect(1);
+        let mut stack = Vec::new();
+        stack.push(I::SI(self.stack.pop().unwrap()));
+        enum I {
+            SI(StackItem),
+            Print(&'static str),
+        }
+        while let Some(e) = stack.pop() {
+            match e {
+                I::SI(StackItem::Int(e)) => self.print(&self.int_stor.get(e).to_string()),
+                I::SI(StackItem::Var(e)) => self.print(&self.var_name(e)),
+                I::SI(StackItem::Binop(binop, fst_arg)) => {
+                    stack.push(I::Print(")"));
+                    stack.push(I::SI(self.refer_exprs[fst_arg as usize - 1]));
+                    stack.push(I::Print(self.binop_to_c_name(binop)));
+                    stack.push(I::SI(self.refer_exprs[fst_arg as usize]));
+                    self.print("(");
+                }
+                I::SI(StackItem::FnCall(name, fst_arg)) => {
+                    let args = self.functions[&name];
+                    let mut at = (fst_arg + 1) - args;
+                    stack.push(I::Print(")"));
+                    for i in 0..args {
+                        if i != 0 {
+                            stack.push(I::Print(","));
+                        }
+                        stack.push(I::SI(self.refer_exprs[at as usize]));
+                        at += 1;
+                    }
+                    self.print(&self.func_name(name));
+                    self.print("(");
+                }
+                I::Print(e) => self.print(e),
+            }
+        }
+    }
+
     fn var_name(&self, name: IdentIdx) -> String {
         format!("var{}", name)
     }
@@ -195,12 +234,12 @@ impl State<'_> {
                     self.print("){");
                 }
                 S::If => {
-                    self.print("if (");
+                    self.print("if(");
                     self.print_first_on_stack();
                     self.print("){");
                 }
                 S::While => {
-                    self.print("while (");
+                    self.print("while(");
                     self.print_first_on_stack();
                     self.print("){");
                 }

@@ -21,6 +21,11 @@ fn is_identifier_char(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+/// the program can have 65536 ints, in the program and u16 refers to a position
+/// in the int_storage array. When lexing, if we find two ints with same value,
+/// they will have the same index into the array.
+/// TODO: Use hashset to speed up checking for duplicate number instead of O(n) lookup in int_storage
+
 struct Lexer<'a> {
     chars: std::iter::Peekable<std::iter::Enumerate<std::str::Chars<'static>>>,
     /// our append-only buffer
@@ -32,7 +37,7 @@ struct Lexer<'a> {
     balanced_delim_stack: Vec<(char, usize)>,
     /// string storage, tokens refer by idx to one of these
     str_storage: Vec<&'static str>,
-    int_storage: Vec<Int>,
+    int_stor: IntStor,
 
     // constant members
     file_name: &'a str,
@@ -43,11 +48,37 @@ struct Lexer<'a> {
     single_char_repeatables: HashMap<char, Keyword>,
 }
 
+pub struct IntStor {
+    /// shall only store unique Int
+    int_storage: Vec<Int>,
+    /// O(1) existance lookup
+    exists: HashMap<Int, u16>,
+}
+impl IntStor {
+    /// doesn't allow duplicates, uses same index
+    pub fn insert_num_get_idx(&mut self, e: Int) -> u16 {
+        if let Some(&at) = self.exists.get(&e) {
+            at
+        } else {
+            let at = self.int_storage.len();
+            self.int_storage.push(e);
+            let at = at
+                .try_into()
+                .expect("User program has too many ints, more than 65536");
+            self.exists.insert(e, at);
+            at
+        }
+    }
+    pub fn get(&self, idx: u16) -> Int {
+        self.int_storage[idx as usize]
+    }
+}
+
 /// initialize lexer datastructures(should be compiletime but...) and lex
 pub fn generate_tokens(
     content: &'static str,
     file_name: &str,
-) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>, Vec<Int>) {
+) -> (Vec<Token>, Vec<(usize, usize)>, Vec<&'static str>, IntStor) {
     let mut lexer = {
         // these have to be seperated by whitespace
         let str_to_keyword: HashMap<&str, Keyword> = {
@@ -112,7 +143,10 @@ pub fn generate_tokens(
             start_char_idx: 0,
             balanced_delim_stack: Vec::new(),
             str_storage: Vec::new(),
-            int_storage: Vec::new(),
+            int_stor: IntStor {
+                int_storage: Vec::new(),
+                exists: HashMap::new(),
+            },
 
             file_name,
             str_to_keyword,
@@ -137,7 +171,7 @@ pub fn generate_tokens(
         lexer.tokens,
         lexer.token_idx_to_char_range,
         identifier_idx_to_string,
-        lexer.int_storage,
+        lexer.int_stor,
     )
 }
 
@@ -242,8 +276,10 @@ impl<'a> Lexer<'a> {
 
                     let num_str = self.get_str();
                     let num = num_str.parse::<_>().unwrap();
-                    self.push(Token::Int(self.int_storage.len().try_into().unwrap()));
-                    self.int_storage.push(num);
+                    // if number already exists in int_storage: reuse that
+                    // TODO: have O(1) hashset to tell whether number is in int_storage
+                    let e = self.int_stor.insert_num_get_idx(num);
+                    self.push(Token::Int(e));
                 }
 
                 // special characters like {}(),; that can be repeated without whitespace

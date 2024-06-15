@@ -1,4 +1,7 @@
 fn main() {
+    print_int(69 + 1234);
+    print_int(69);
+    print_int(1234);
     print_int(1 + 2 * 2 + 1);
     {
         let a = 1;

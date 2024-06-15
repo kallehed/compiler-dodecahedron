@@ -1,7 +1,7 @@
 use crate::parser::Soken;
 use std::collections::HashMap;
 
-use crate::{parser::BinaryOp, IdentIdx, Int};
+use crate::{parser::BinaryOp, IdentIdx};
 
 #[derive(Clone, Copy)]
 enum StackItem {
@@ -15,6 +15,8 @@ enum StackItem {
     /// you can get nr of args from the name
     FnCall(IdentIdx, u16),
 }
+
+use crate::lexer::IntStor;
 
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
@@ -30,7 +32,7 @@ struct State<'b> {
     c_code: String,
 
     // constant
-    int_storage: &'b [Int],
+    int_stor: &'b IntStor,
     functions: &'b HashMap<IdentIdx, u16>,
     ident_idx_to_string: &'b [&'static str],
 }
@@ -40,7 +42,7 @@ pub fn to_c_code(
     sokens: &[Soken],
     ident_idx_to_string: &[&'static str],
     functions: &HashMap<IdentIdx, u16>,
-    int_storage: &[Int],
+    int_stor: &IntStor,
 ) -> String {
     let mut s = State {
         refer_exprs: Vec::new(),
@@ -51,7 +53,7 @@ pub fn to_c_code(
         c_declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
         c_code: String::new(),
 
-        int_storage,
+        int_stor,
         functions,
         ident_idx_to_string,
     };
@@ -109,7 +111,7 @@ impl State<'_> {
         use StackItem as SI;
         fn recurse(s: &mut State, e: SI) {
             match e {
-                SI::Int(istor) => s.print(&s.int_storage[istor as usize].to_string()),
+                SI::Int(at) => s.print(&s.int_stor.get(at).to_string()),
                 SI::Var(ident) => s.print(&s.var_name(ident)),
                 SI::Binop(binop, left_idx) => {
                     s.print("(");

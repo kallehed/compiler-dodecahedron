@@ -54,7 +54,7 @@ fn main() {
         .leak();
 
     println!(" \n--- STARTING LEXING!");
-    let (tokens, token_idx_to_char_range, ident_idx_to_string, mut int_storage) =
+    let (tokens, token_idx_to_char_range, ident_idx_to_string, mut int_stor) =
         lexer::generate_tokens(source, file_name);
     println!("tokens: {:?}", tokens);
 
@@ -84,12 +84,11 @@ fn main() {
         source,
         file_name,
         &token_idx_to_char_range,
-        &mut int_storage,
+        &mut int_stor,
     );
     println!("After verifying: {:?}", &sokens);
     eprintln!("nbr of sokens: {}", sokens.len());
     let total_sok_before_filter = sokens.len();
-    // TODO filter Nil from Sokens
     let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();
     let sokens: Vec<Soken> = sokens.into_iter().filter(|&e| Soken::Nil != e).collect();
     println!("'\nAfter filtering Nil: {:?}", &sokens);
@@ -100,7 +99,7 @@ fn main() {
     );
 
     {
-        let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string, &functions, &int_storage);
+        let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string, &functions, &int_stor);
 
         println!("\n--- Now printing C code: \n");
         println!("{}", c_code);

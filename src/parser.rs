@@ -334,6 +334,28 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         self.parse_binop_and_right(0)
     }
 
+    fn parse_binop_and_right(&mut self, prev_prec: BinOpPrec) {
+        loop {
+            let (our_prec, p) = self.parse_oper();
+            // if find binop that is LESS binding, have to go back and create expr for this like going from  * to +
+            if our_prec < prev_prec {
+                return; // also, if reached end -> prec will be -1, so goes back
+            }
+            self.eat(); // eat operator
+
+            // get right hand side
+            self.parse_primary();
+            // peek at operator after right hand side
+            let (next_prec, _) = self.parse_oper();
+            // now we have (a+b), though if the precedence AFTER binds tighter, this is actually a + (b * ...)
+            if next_prec > our_prec {
+                self.parse_binop_and_right(our_prec + 1);
+            }
+            // merge left and right
+            self.push(Soken::Binop(BinaryOp::from_number(our_prec)), p);
+        }
+    }
+
     fn parse_primary(&mut self) {
         let (p, &token) = self.eat();
         let soken = match token {
@@ -389,28 +411,6 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         }
         self.eat(); // eat end paren
         args
-    }
-
-    fn parse_binop_and_right(&mut self, prev_prec: BinOpPrec) {
-        loop {
-            let (our_prec, p) = self.parse_oper();
-            // if find binop that is LESS binding, have to go back and create expr for this like going from  * to +
-            if our_prec < prev_prec {
-                return; // also, if reached end -> prec will be -1, so goes back
-            }
-            self.eat(); // eat operator
-
-            // get right hand side
-            self.parse_primary();
-            // peek at operator after right hand side
-            let (next_prec, _) = self.parse_oper();
-            // now we have (a+b), though if the precedence AFTER binds tighter, this is actually a + (b * ...)
-            if next_prec > our_prec {
-                self.parse_binop_and_right(our_prec + 1);
-            }
-            // merge left and right
-            self.push(Soken::Binop(BinaryOp::from_number(our_prec)), p);
-        }
     }
 
     /// returns precedence of binop and it's token index.

@@ -1,11 +1,13 @@
 use crate::parser::Soken;
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::BinaryOp, IdentIdx, Int};
+use crate::{parser::BinaryOp, IdentIdx};
+
+use crate::lexer::IntStor;
 
 /// Could either be a literal, or it could be something unknown with a type
 enum StackItem {
-    /// int literal 34, 54, 21, use SokIdx to get what it is if you want from int_storage
+    /// int literal 34, 54, 21, use SokIdx to get what it is if you want from int_stor
     /// common case is not to look at int literals, so use array access for that.
     LitInt,
     /// result of variable addition or whatever x + y, x+1
@@ -42,7 +44,7 @@ struct State<'b> {
     si: SokIdx,
 
     // not constant, because we change some when constant propogation
-    int_storage: &'b mut Vec<Int>,
+    int_stor: &'b mut IntStor,
 
     // constant
     functions: &'b HashMap<IdentIdx, u16>,
@@ -62,7 +64,7 @@ pub fn run<'a>(
     source: &'a str,
     file_name: &'a str,
     token_idx_to_char_range: &[(usize, usize)],
-    int_storage: &mut Vec<Int>,
+    int_stor: &mut IntStor,
 ) {
     let mut s = State {
         vars: HashSet::new(),
@@ -73,7 +75,7 @@ pub fn run<'a>(
         origins,
         si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
 
-        int_storage,
+        int_stor,
 
         functions,
         ident_idx_to_string,
@@ -274,8 +276,8 @@ impl State<'_> {
                                     Soken::Int(e) => e,
                                     _ => unreachable!(),
                                 };
-                                let l = self.int_storage[l_intstor as usize];
-                                let r = self.int_storage[r_intstor as usize];
+                                let l = self.int_stor.get(l_intstor);
+                                let r = self.int_stor.get(r_intstor);
                                 // bc rust semantics we do wrapping_add etc
                                 let res = match binop {
                                     B::Eql => (l == r) as i64,
@@ -286,11 +288,11 @@ impl State<'_> {
                                     B::Mul => l.wrapping_mul(r),
                                     _ => unreachable!(),
                                 };
+                                let new_idx = self.int_stor.insert_num_get_idx(res);
+
                                 self.sokens[left.1 .0] = Soken::Nil;
                                 self.sokens[right.1 .0] = Soken::Nil;
-                                // replace left int_storage with new value
-                                self.int_storage[l_intstor as usize] = res;
-                                self.sokens[self.si.0] = Soken::Int(l_intstor); // propogation
+                                self.sokens[self.si.0] = Soken::Int(new_idx); // propogation
                                 self.spush(StackItem::LitInt);
                             } else {
                                 self.spush(StackItem::UnkownInt); // one is either unknown or variable -> Var

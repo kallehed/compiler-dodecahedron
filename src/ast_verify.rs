@@ -25,6 +25,7 @@ struct Scope {
     propogates_return: bool,
     /// is function body
     must_return: bool,
+    name: IdentIdx,
 }
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
@@ -43,12 +44,11 @@ struct State<'b> {
     origins: &'b [usize],
     si: SokIdx,
 
-    // not constant, because we change some when constant propogation
+    // not constant, because we can add new ints when constant propogation
     int_stor: &'b mut IntStor,
 
     // constant
     functions: &'b HashMap<IdentIdx, u16>,
-    /// TODO: use this for better err msgs
     ident_idx_to_string: &'b [&'static str],
     source: &'b str,
     file_name: &'b str,
@@ -87,15 +87,11 @@ pub fn run<'a>(
 }
 
 impl State<'_> {
-    /// add var, also send token index of soken of var, uses implicit si
-    fn add_var(&mut self, name: IdentIdx) {
-        if !self.vars.insert(name) {
-            self.report_error("Variable has already been declared!");
-        }
-        // if global scope contains it, this can't (can't assert bc Vector::push)
-        self.scopes.last_mut().unwrap().vars += 1;
-        self.ordered_vars.push(name);
+    fn eat(&mut self) -> Soken {
+        self.si.0 = self.si.0.wrapping_add(1);
+        self.sokens[self.si.0]
     }
+
     /// stack pop, get item, and where it originated from sokens
     fn spop(&mut self) -> (StackItem, SokIdx) {
         self.stack.pop().unwrap()
@@ -104,24 +100,12 @@ impl State<'_> {
     fn spush(&mut self, it: StackItem) {
         self.stack.push((it, self.si));
     }
-    fn create_scope(&mut self, propogates_return: bool, must_return: bool) {
-        self.scopes.push(Scope {
-            returns: false,
-            vars: 0,
-            propogates_return,
-            must_return,
-        });
-    }
-    fn eat(&mut self) -> Soken {
-        self.si.0 = self.si.0.wrapping_add(1);
-        self.sokens[self.si.0]
-    }
     /// internal logic assertion on nbr of items on stack
     fn sexpect(&mut self, items: usize) {
         if self.stack.len() != items {
             println!();
             self.report_error(&format!(
-                "got {} stackitems, but wants {}",
+                "INTERNAL AST_VERIFY ERROR: got {} stackitems, but wants {}",
                 self.stack.len(),
                 items
             ));
@@ -138,6 +122,24 @@ impl State<'_> {
             self.report_error(msg);
         }
     }
+    /// add var, also send token index of soken of var, uses implicit si
+    fn add_var(&mut self, name: IdentIdx) {
+        if !self.vars.insert(name) {
+            self.report_error("Variable has already been declared!");
+        }
+        // if global scope contains it, this can't (can't assert bc Vector::push)
+        self.scopes.last_mut().unwrap().vars += 1;
+        self.ordered_vars.push(name);
+    }
+    fn create_scope(&mut self, propogates_return: bool, must_return: bool, name: IdentIdx) {
+        self.scopes.push(Scope {
+            returns: false,
+            vars: 0,
+            propogates_return,
+            must_return,
+            name,
+        });
+    }
     /// What it does:
     /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
     ///
@@ -151,24 +153,26 @@ impl State<'_> {
     fn verify(&mut self) {
         // for each scope, we have a vec cataloging the variables that exist, makes poping easier
         loop {
+            use Soken as S;
             match self.eat() {
-                Soken::EndStat => {
+                S::EndStat => {
                     self.sexpect_clear(1); // throw away 1 stack item
                 }
-                Soken::Return => {
+                // Could be better abstracted, to be able to receive items or not care
+                S::Return => {
                     self.sexpect_int_clear("Return value must be Int");
                     // signal that this scope returns
                     self.scopes.last_mut().unwrap().returns = true;
                 }
-                Soken::CreateVar(name) => {
+                S::CreateVar(name) => {
                     self.sexpect(0);
                     self.add_var(name);
                 }
                 // basically just create arg variables
                 // TODO: maybe store name ident in scope so we can print it later if function doesn't return?
-                Soken::FuncDef(name) => {
+                S::FuncDef(name) => {
                     self.sexpect(0);
-                    self.create_scope(false, true); // false bc outer scope is weird
+                    self.create_scope(false, true, name); // false bc outer scope is weird
                     let args = *self.functions.get(&name).unwrap();
                     for _ in 0..args {
                         match self.eat() {
@@ -179,28 +183,30 @@ impl State<'_> {
                         }
                     }
                 }
-                Soken::If => {
+                S::If => {
                     self.sexpect_int_clear("If condition must be Int");
-                    self.create_scope(false, false); // don't know if reached
+                    self.create_scope(false, false, 0); // don't know if reached
                 }
-                Soken::While => {
+                S::While => {
                     self.sexpect_int_clear("While condition must be Int");
-                    self.create_scope(false, false); // don't know if reached
+                    self.create_scope(false, false, 0); // don't know if reached
                 }
-                Soken::ScopeStart => {
+                S::ScopeStart => {
                     self.sexpect(0);
-                    self.create_scope(true, false);
+                    self.create_scope(true, false, 0);
                 } // basic scope
                 // remove the variables that were in the scope from the global vars
-                Soken::ScopeEnd => {
+                S::ScopeEnd => {
                     self.sexpect(0);
                     let scope = self.scopes.last().unwrap();
                     for _ in 0..scope.vars {
                         assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
                     }
                     if scope.must_return && !scope.returns {
-                        // BAD! Can't just end while not having returned anything!
-                        self.report_error("Function did not return");
+                        self.report_error(&format!(
+                            "Function `{}` did not return",
+                            self.ident_idx_to_string[scope.name as usize]
+                        ));
                     }
                     let outer_scope_returns = scope.propogates_return && scope.returns;
                     self.scopes.pop();
@@ -211,9 +217,9 @@ impl State<'_> {
                     }
                 }
                 // HERE BEGINS EXPR SOKENS
-                Soken::Int(_) => self.spush(StackItem::LitInt),
+                S::Int(_) => self.spush(StackItem::LitInt),
                 // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
-                Soken::Var(e) => {
+                S::Var(e) => {
                     if !self.vars.contains(&e) {
                         self.report_error("Variable used before declaration");
                     }
@@ -221,7 +227,7 @@ impl State<'_> {
                 }
 
                 // CALL to ALREADY EXISTING function
-                Soken::FuncCall(name, supposed_args) => {
+                S::FuncCall(name, supposed_args) => {
                     // make sure function called with correct nr of arguments
                     if let Some(&args) = self.functions.get(&name) {
                         if args != supposed_args {
@@ -241,7 +247,7 @@ impl State<'_> {
                 }
                 // make sure that setters have a left l-value,
                 // if regular binop, constant propogate ints
-                Soken::Binop(binop) => {
+                S::Binop(binop) => {
                     // self.sexpect(2, "binop needs two values");
                     let right = self.spop();
                     let left = self.spop();
@@ -300,7 +306,7 @@ impl State<'_> {
                         }
                     }
                 }
-                Soken::Nil => {
+                S::Nil => {
                     unreachable!("ast won't contain nil after parsing, so impossible")
                 }
             }

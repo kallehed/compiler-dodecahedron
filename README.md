@@ -20,6 +20,8 @@ Program correctness thoughts:
 - Should every AST node have a source reference, like, char range? Yes
 
 TODO: Don't allow nested functions, right now: bad behaviour.
+TODO: Better errors, be able to show 2 locations (use when bad delimiters, also when no return)
+TOOD: maybe use Default more, but doesn't work when you can't default all the fields (can't default some iterator)
 
 # How to run the things:
 Compile when change:

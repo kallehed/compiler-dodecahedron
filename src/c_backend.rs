@@ -64,21 +64,26 @@ pub fn to_c_code(
 }
 
 impl State<'_> {
+    fn eat(&mut self) -> Soken {
+        self.si.0 = self.si.0.wrapping_add(1);
+        self.sokens[self.si.0]
+    }
+
     fn spop(&mut self) -> StackItem {
         self.stack.pop().unwrap()
     }
     fn spush(&mut self, e: StackItem) {
         self.stack.push(e);
     }
-    fn eat(&mut self) -> Soken {
-        self.si.0 = self.si.0.wrapping_add(1);
-        self.sokens[self.si.0]
-    }
     /// internal logic assertion on nbr of items on stack
     fn sexpect(&mut self, items: usize) {
         if self.stack.len() != items {
             println!();
-            println!("got {} stackitems, but wants {}", self.stack.len(), items);
+            panic!(
+                "C BACKEND ERROR: got {} stackitems, but wants {}",
+                self.stack.len(),
+                items
+            );
         }
     }
     fn print(&mut self, s: &str) {

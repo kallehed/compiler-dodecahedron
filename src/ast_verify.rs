@@ -1,7 +1,7 @@
 use crate::parser::Soken;
 use std::collections::{HashMap, HashSet};
 
-use crate::{parser::BinaryOp, IdentIdx};
+use crate::{parser::BinaryOp, IdentIdx, Int};
 
 use crate::lexer::IntStor;
 
@@ -115,12 +115,12 @@ impl State<'_> {
         self.sexpect(items);
         self.stack.clear();
     }
-    fn sexpect_int_clear(&mut self, msg: &str) {
-        self.sexpect(1);
+    fn sexpect_int(&mut self, msg: &str) -> (StackItem, SokIdx) {
         let ret_val = self.spop();
         if let StackItem::Unit = ret_val.0 {
             self.report_error(msg);
         }
+        ret_val
     }
     /// add var, also send token index of soken of var, uses implicit si
     fn add_var(&mut self, name: IdentIdx) {
@@ -160,7 +160,8 @@ impl State<'_> {
                 }
                 // Could be better abstracted, to be able to receive items or not care
                 S::Return => {
-                    self.sexpect_int_clear("Return value must be Int");
+                    self.sexpect(1);
+                    self.sexpect_int("Return value must be Int");
                     // signal that this scope returns
                     self.scopes.last_mut().unwrap().returns = true;
                 }
@@ -184,11 +185,13 @@ impl State<'_> {
                     }
                 }
                 S::If => {
-                    self.sexpect_int_clear("If condition must be Int");
+                    self.sexpect(1);
+                    self.sexpect_int("If condition must be Int");
                     self.create_scope(false, false, 0); // don't know if reached
                 }
                 S::While => {
-                    self.sexpect_int_clear("While condition must be Int");
+                    self.sexpect(1);
+                    self.sexpect_int("While condition must be Int");
                     self.create_scope(false, false, 0); // don't know if reached
                 }
                 S::ScopeStart => {
@@ -237,7 +240,10 @@ impl State<'_> {
                             ));
                         }
                     } else {
-                        self.report_error("Function does not exist");
+                        self.report_error(&format!(
+                            "Function `{}` does not exist",
+                            self.ident_idx_to_string[name as usize]
+                        ));
                     }
                     // drop supposed_args amount of arguments
                     for _ in 0..supposed_args {
@@ -249,46 +255,35 @@ impl State<'_> {
                 // if regular binop, constant propogate ints
                 S::Binop(binop) => {
                     // self.sexpect(2, "binop needs two values");
-                    let right = self.spop();
-                    let left = self.spop();
-                    // TODO: DRY the code
-                    match left.0 {
-                        StackItem::LitInt | StackItem::UnkownInt | StackItem::Var => (),
-                        StackItem::Unit => self.report_error("Can't do binop on Unit"),
-                    }
-                    match right.0 {
-                        StackItem::LitInt | StackItem::UnkownInt | StackItem::Var => (),
-                        StackItem::Unit => self.report_error("Can't do binop on Unit"),
-                    }
+                    let right = self.sexpect_int("Can't do binop on Unit");
+                    let left = self.sexpect_int("Can't do binop on Unit");
+
                     use BinaryOp as B;
                     match binop {
                         B::SetAdd | B::SetSub | B::Set => {
                             // `left` has to be ident, ERROR
-                            if let StackItem::Var = left.0 {
-                                self.spush(StackItem::Unit); // setting returns Unit
-                            } else {
+                            if !matches!(left.0, StackItem::Var) {
                                 self.report_error( "Left hand side of setter can't be expression, must be variable name")
                             }
+                            self.spush(StackItem::Unit); // setting returns Unit
                         }
                         B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
                             // constant propogation
                             if let (StackItem::LitInt, StackItem::LitInt) = (left.0, right.0) {
                                 // get values
-                                let l_intstor = match self.sokens[left.1 .0] {
-                                    Soken::Int(e) => e,
+                                let l = match self.sokens[left.1 .0] {
+                                    Soken::Int(e) => self.int_stor.get(e),
                                     _ => unreachable!(),
                                 };
-                                let r_intstor = match self.sokens[right.1 .0] {
-                                    Soken::Int(e) => e,
+                                let r = match self.sokens[right.1 .0] {
+                                    Soken::Int(e) => self.int_stor.get(e),
                                     _ => unreachable!(),
                                 };
-                                let l = self.int_stor.get(l_intstor);
-                                let r = self.int_stor.get(r_intstor);
                                 // bc rust semantics we do wrapping_add etc
                                 let res = match binop {
-                                    B::Eql => (l == r) as i64,
-                                    B::Les => (l < r) as i64,
-                                    B::Mor => (l > r) as i64,
+                                    B::Eql => (l == r) as Int,
+                                    B::Les => (l < r) as Int,
+                                    B::Mor => (l > r) as Int,
                                     B::Add => l.wrapping_add(r),
                                     B::Sub => l.wrapping_sub(r),
                                     B::Mul => l.wrapping_mul(r),

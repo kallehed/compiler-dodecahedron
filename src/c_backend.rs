@@ -92,6 +92,10 @@ impl State<'_> {
     fn print_decl(&mut self, s: &str) {
         self.c_declarations.push_str(s);
     }
+    fn pr_both(&mut self, s: &str) {
+        self.print(s);
+        self.print_decl(s);
+    }
     fn binop_to_c_name(&self, op: BinaryOp) -> &'static str {
         use BinaryOp as B;
         match op {
@@ -111,6 +115,7 @@ impl State<'_> {
     /// but easy recursive version first
     /// TODO: make not recursive
     fn print_first_on_stack(&mut self) {
+        self.sexpect(1); // we only do this when have one thing on stack
         let e = self.stack.pop().unwrap();
         recurse(self, e);
         use StackItem as SI;
@@ -158,12 +163,10 @@ impl State<'_> {
             use Soken as S;
             match self.eat() {
                 S::EndStat => {
-                    self.sexpect(1);
                     self.print_first_on_stack();
                     self.print(";");
                 }
                 S::Return => {
-                    self.sexpect(1);
                     self.print("return ");
                     self.print_first_on_stack();
                     self.print(";");
@@ -175,18 +178,15 @@ impl State<'_> {
                 }
                 S::FuncDef(name) => {
                     self.sexpect(0);
-                    self.print_decl(&format!("int64_t {}(", self.func_name(name)));
-                    self.print(&format!("int64_t {}(", self.func_name(name)));
+                    self.pr_both(&format!("int64_t {}(", self.func_name(name)));
                     let args = *self.functions.get(&name).unwrap();
                     for i in 0..args {
                         if i != 0 {
-                            self.print(",");
-                            self.print_decl(",");
+                            self.pr_both(",");
                         }
                         match self.eat() {
                             Soken::Var(arg) => {
-                                self.print_decl(&format!("int64_t {}", self.var_name(arg)));
-                                self.print(&format!("int64_t {}", self.var_name(arg)));
+                                self.pr_both(&format!("int64_t {}", self.var_name(arg)))
                             }
                             _ => unreachable!(),
                         }
@@ -195,13 +195,11 @@ impl State<'_> {
                     self.print("){");
                 }
                 S::If => {
-                    self.sexpect(1);
                     self.print("if (");
                     self.print_first_on_stack();
                     self.print("){");
                 }
                 S::While => {
-                    self.sexpect(1);
                     self.print("while (");
                     self.print_first_on_stack();
                     self.print("){");
@@ -215,12 +213,9 @@ impl State<'_> {
                     self.print("}");
                 }
                 // HERE BEGINS EXPR SOKENS
-                S::Int(intstor) => {
-                    self.spush(StackItem::Int(intstor));
-                }
-                S::Var(e) => {
-                    self.spush(StackItem::Var(e));
-                }
+                S::Int(intstor) => self.spush(StackItem::Int(intstor)),
+                S::Var(e) => self.spush(StackItem::Var(e)),
+
                 // CALL to ALREADY EXISTING function
                 S::FuncCall(name, supposed_args) => {
                     for _ in 0..supposed_args {
@@ -231,13 +226,13 @@ impl State<'_> {
                     let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
                     let fst_arg_idx = fst_arg_idx.overflowing_sub(1).0;
                     self.spush(StackItem::FnCall(name, fst_arg_idx));
-                    // function with no args could possibly get u16::MAX, but that's fine because we won't take any args anyway
+                    // function with no args could possibly get u16::MAX (only in super special case though), but that's fine because we won't take any args anyway
                 }
                 S::Binop(binop) => {
                     // put both on refer exprs
                     for _ in 0..2 {
-                        let aaa = self.spop();
-                        self.refer_exprs.push(aaa);
+                        let e = self.spop();
+                        self.refer_exprs.push(e);
                     }
                     // on stack, but the binop, looking at top of refer_exprs
                     let fst_arg_idx: u16 = self.refer_exprs.len().try_into().unwrap();
@@ -245,7 +240,7 @@ impl State<'_> {
                     self.spush(StackItem::Binop(binop, fst_arg_idx));
                 }
                 S::Nil => {
-                    unreachable!("ast won't contain nil as they were filtered after ast_verify")
+                    unreachable!("ast won't contain nil as they were filtered after ast_verif")
                 }
             }
             // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end

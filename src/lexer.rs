@@ -7,8 +7,6 @@ use crate::Keyword;
 use crate::SetType;
 use crate::COMMENT_PREFIX;
 
-// TODO find paren mismatches
-
 #[derive(Debug, Copy, Clone)]
 pub enum Token {
     // index into `str_storage` of Lexer
@@ -125,9 +123,16 @@ pub fn generate_tokens(
     };
     lexer.lex();
     let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
-    for (string, ident) in lexer.identifier_to_int {
+    for (&string, &ident) in lexer.identifier_to_int.iter() {
         identifier_idx_to_string[ident as usize] = string;
     }
+
+    if !lexer.balanced_delim_stack.is_empty() {
+        for &bal_del in lexer.balanced_delim_stack.iter() {
+            lexer.report_incorrect_syntax_at("Delimiter not closed", bal_del.1, bal_del.1 + 1);
+        }
+    }
+
     (
         lexer.tokens,
         lexer.token_idx_to_char_range,
@@ -142,7 +147,7 @@ impl<'a> Lexer<'a> {
         let end_wher = self.peek().0;
         self.report_incorrect_syntax_at(msg, start_wher, end_wher);
     }
-    fn report_incorrect_syntax_at(&mut self, msg: &str, start_wher: usize, end_wher: usize) {
+    fn report_incorrect_syntax_at(&mut self, msg: &str, start_wher: usize, end_wher: usize) -> ! {
         // TODO print better error message
         let mut line = 1;
         let mut col = 1;

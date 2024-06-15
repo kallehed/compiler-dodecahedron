@@ -57,9 +57,7 @@ pub enum Soken {
     Var(IdentIdx),
     /// standalone
     CreateVar(IdentIdx),
-    /// Name and nr of args
-    /// expects nr of args
-    /// the definition comes after, TODO how to know when it ends?
+    /// Name, lookup in hashmap how many args
     FuncDef(IdentIdx),
     /// two
     Binop(BinaryOp),

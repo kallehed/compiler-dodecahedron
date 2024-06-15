@@ -51,6 +51,7 @@ or use shorthand:
 Currently recursive descent that generates reverse polish notation type flat tree `Soken`'s
 Correctness of balanced delimiters ([{}]) is controlled by lexer.
 
+```
 <PROGRAM> ::= <STATEMENT>*
 <STATEMENT> ::= <FN_DEF> | <CREATE_VAR> | <IF> | <WHILE> | <RETURN> | <SCOPE> | <STATEMENT_EXPR>
 
@@ -67,6 +68,7 @@ Correctness of balanced delimiters ([{}]) is controlled by lexer.
 <PRIMARY> ::= [string] | [int] | ([(] <EXPR>) | <FUNC_CALL> | [ident] (no following [(])
 <FUNC_CALL> ::= [ident] [(] (<EXPR> [,])* [)]
 (except last comma)
+```
 
 # Flat syntax tree shenanigans
 thought - let everything collapse right into operators like shunting yard algorithm

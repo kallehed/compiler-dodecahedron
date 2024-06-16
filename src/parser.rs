@@ -120,7 +120,7 @@ macro_rules! eat_require {
     ($self:ident, $the_pattern:pat, $msg:literal) => {
         match { $self.eat() } {
             (n, $the_pattern) => n,
-            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+            (n, &t) => $self.report($msg, Some(&t), n),
         }
     };
 }
@@ -129,7 +129,7 @@ macro_rules! eat_require_get {
     ($self:ident, $the_pattern:path, $msg:literal) => {
         match $self.eat() {
             (n, &$the_pattern(a)) => (n, a),
-            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+            (n, &t) => $self.report($msg, Some(&t), n),
         }
     };
 }
@@ -137,7 +137,7 @@ macro_rules! peek_require_get {
     ($self:ident, $the_pattern:path, $msg:literal) => {
         match $self.peek() {
             (n, &$the_pattern(a)) => (n, a),
-            (n, &t) => $self.report_incorrect_semantics($msg, Some(&t), n),
+            (n, &t) => $self.report($msg, Some(&t), n),
         }
     };
 }
@@ -151,12 +151,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         self.tokens.peek().copied().unwrap()
     }
 
-    fn report_incorrect_semantics(
-        &mut self,
-        msg: &str,
-        bad_tok: Option<&Token>,
-        token_start_idx: usize,
-    ) -> ! {
+    fn report(&mut self, msg: &str, bad_tok: Option<&Token>, token_start_idx: usize) -> ! {
         crate::mark_error_in_source(
             self.source,
             self.file_name,
@@ -229,7 +224,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             "Expected function name identifier"
                         );
                         if self.functions.contains_key(&func_name) {
-                            self.report_incorrect_semantics(
+                            self.report(
                                 "Function with same name already declared!",
                                 None,
                                 func_name_place,
@@ -251,11 +246,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         let arg_name = match arg {
                             Token::Identifier(arg_name) => arg_name,
                             Token::Keyword(Keyword::EndParen) => break,
-                            arg => self.report_incorrect_semantics(
-                                "Expected argument name",
-                                Some(&arg),
-                                arg_place,
-                            ),
+                            arg => self.report("Expected argument name", Some(&arg), arg_place),
                         };
                         args += 1;
                         self.push(Soken::Var(arg_name), arg_place);
@@ -263,14 +254,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         match self.eat() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
                             (_, Token::Keyword(Keyword::EndParen)) => break,
-                            (n, &t) => self.report_incorrect_semantics(
+                            (n, &t) => self.report(
                                 "Expected comma or end parenthesis after argument",
                                 Some(&t),
                                 n,
                             ),
                         };
                     }
-
                     self.functions.insert(func_name, args);
                     self.parse_scope_require_start_brace(false);
                 }
@@ -318,11 +308,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.parse_expr();
                     self.require_semicolon(true);
                 }
-                &t => self.report_incorrect_semantics(
-                    "Erroneous token to start statement with",
-                    Some(&t),
-                    place,
-                ),
+                &t => self.report("Erroneous token to start statement with", Some(&t), place),
             };
         }
     }
@@ -359,11 +345,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_primary(&mut self) {
         let (p, &token) = self.eat();
         let soken = match token {
-            Token::String(_) => self.report_incorrect_semantics(
-                "Strings not allowed in language currently!",
-                None,
-                p,
-            ),
+            Token::String(_) => self.report("Strings not allowed in language currently!", None, p),
             Token::Int(e) => Soken::Int(e),
             Token::Keyword(Keyword::StartParen) => {
                 self.parse_expr();
@@ -381,9 +363,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     _ => Soken::Var(e),
                 }
             }
-            t @ Token::Keyword(_) => {
-                self.report_incorrect_semantics("no keywords as primary in expr", Some(&t), p)
-            }
+            t @ Token::Keyword(_) => self.report("no keywords as primary in expr", Some(&t), p),
         };
         self.push(soken, p);
     }
@@ -405,7 +385,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     (_, Token::Keyword(Keyword::Comma)) => {
                         self.eat(); // eat comma
                     }
-                    (n, &t) => self.report_incorrect_semantics("expected comma", Some(&t), n),
+                    (n, &t) => self.report("expected comma", Some(&t), n),
                 }
             }
         }
@@ -432,7 +412,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             T(K::Set(SetType::Sub)) => B::SetSub.prec(),
             T(K::Set(SetType::Set)) => B::Set.prec(),
             T(K::EndParen) | T(K::EndStatement) | T(K::StartBlock) | T(K::Comma) => -1, // -1 precedence, end of expr
-            _ => self.report_incorrect_semantics(
+            _ => self.report(
                 &format!(
                     "What are you doing? Can't just put token `{:?}` here!",
                     res_token

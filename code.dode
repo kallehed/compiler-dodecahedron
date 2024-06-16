@@ -40,6 +40,9 @@ fn main() {
     # expensive
     print_int(rec_fibb(40));
     return 69;
+    let asd = 3 + 3 + 3;
+
+    3 +  omega(2,4) + 1;
 
 }
 
@@ -53,6 +56,8 @@ fn non_returning() {
         return 4;
     }
 }
+
+fn omega(a,b) {return 0;}
 
 fn print_zeroes(n) {
     let b = 0;

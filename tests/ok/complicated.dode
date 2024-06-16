@@ -1,0 +1,39 @@
+
+
+fn main() {
+    let asdy;
+    asdy = 9999999-1+2+3-1+2*2+asdy;
+    let om = other(3,5,6)*3*4+(other(3+(343*3+asdy),55,2));
+    om += (1+2*3)+other(1,2,3)+other(3*3,5*3,2*3+1);
+    if many() * 33 {
+        let x = 3;
+        return x + om + asdy;
+    }
+    while om*(34+3+3+3+3>222222)>om {
+        if 1 {if 1 {if 1 {return 3;}}}
+    }
+    return 55;
+}
+fn many() {
+    return 3;
+    return 4;
+}
+
+fn other(a,b,c) {
+    let x = 34;
+    let y = 45;
+    let z = x * z + 3 - 2 * ((3333-x));
+    while x > 3 {
+        if y < 3*3*3 {
+            let ooo = x*x*x - (33);
+            ooo += (((3)*x)*y*z+3+3+3*(3+1))*z;
+            return ooo - 3;
+        }
+    }
+    let o = ((((((3)+1)+2)+x)+y)+z)+4-1;
+    {
+        {
+            return many() - o;
+        }
+    }
+}

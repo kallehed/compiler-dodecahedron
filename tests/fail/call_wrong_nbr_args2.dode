@@ -1,0 +1,8 @@
+
+fn main() {
+    return other(1,2,3,4);
+}
+
+fn other(a,b,c) {
+    return a+b+c;
+}

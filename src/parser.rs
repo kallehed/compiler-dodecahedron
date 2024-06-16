@@ -200,7 +200,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
     /// doesn't output any { or } sokens
     fn parse_scope(&mut self) {
-        while let Some(&(place, &token)) = self.tokens.peek() {
+        while let Some(&(p, &token)) = self.tokens.peek() {
             println!("parse token {:?}", token);
             match &token {
                 Token::Keyword(Keyword::FunctionIncoming) => {
@@ -227,7 +227,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         Token::Keyword(Keyword::StartParen),
                         "Expected start parenthesis after function name"
                     );
-                    self.push(Soken::FuncDef(func_name), place);
+                    self.push(Soken::FuncDef(func_name), p);
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut args = 0;
                     loop {
@@ -268,29 +268,30 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 Token::Keyword(Keyword::If) => {
                     self.eat();
                     self.parse_expr();
-                    self.push(Soken::If, place);
+                    self.push(Soken::If, p);
                     self.require_start_brace(false);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
-                    self.push(Soken::While, place);
+                    self.push(Soken::While, p);
                     self.require_start_brace(false);
                 }
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
                     self.eat(); // eat return token
                     self.parse_expr();
-                    self.push(Soken::Return, place);
+                    self.push(Soken::Return, p);
                     self.require_semicolon(false);
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.require_start_brace(true); // notice no eating!
+                    self.eat();
+                    self.push(Soken::ScopeStart, p);
                 }
                 Token::Keyword(Keyword::EndBlock) => {
                     self.eat();
-                    self.push(Soken::ScopeEnd, place);
+                    self.push(Soken::ScopeEnd, p);
                 }
                 // Function call, or just expression
                 &Token::Identifier(_) | Token::Int(_) | Token::String(_) => {
@@ -298,13 +299,107 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.parse_expr();
                     self.require_semicolon(true);
                 }
-                &t => self.report("Erroneous token to start statement with", Some(&t), place),
+                &t => self.report("Erroneous token to start statement with", Some(&t), p),
             };
         }
     }
 
-    /// doesn't eat end of expression
     fn parse_expr(&mut self) {
+        let mut op_stack = Vec::new();
+        enum Shunt {
+            StartParen(usize),
+            StartFunc(IdentIdx, usize),
+            Op(BinOpPrec, usize),
+            Comma,
+        }
+        loop {
+            let res = self.peek();
+            let res = (res.0, *res.1);
+            println!("expr: {:?}", res.1);
+            match res.1 {
+                Token::Keyword(Keyword::Comma) => {
+                    self.eat();
+                    op_stack.push(Shunt::Comma);
+                }
+                Token::String(_) => self.report("Strings not allowed", Some(&res.1), res.0),
+                Token::Int(e) => {
+                    self.eat();
+                    self.push(Soken::Int(e), res.0);
+                }
+                Token::Identifier(e) => {
+                    self.eat();
+                    // can either be a variable or a function call
+                    match self.peek() {
+                        (_, Token::Keyword(Keyword::StartParen)) => {
+                            self.eat(); // eat start paren
+                            match self.peek() {
+                                // have full function call here
+                                (_, Token::Keyword(Keyword::EndParen)) => {
+                                    self.push(Soken::FuncCall(e, 0), res.0)
+                                }
+                                _ => op_stack.push(Shunt::StartFunc(e, res.0)),
+                            }
+                        }
+                        _ => self.push(Soken::Var(e), res.0),
+                    }
+                }
+                Token::Keyword(Keyword::StartParen) => {
+                    self.eat();
+                    op_stack.push(Shunt::StartParen(res.0));
+                }
+                Token::Keyword(Keyword::EndParen) => {
+                    self.eat();
+                    // move thing out of op_stack until paren
+                    let mut args = 1; // 0 args case already handled
+                    loop {
+                        let e = op_stack.pop().unwrap();
+                        match e {
+                            Shunt::Comma => args += 1,
+                            Shunt::StartParen(p) => {
+                                if args > 1 {
+                                    self.report("can't have commas in ()", None, p)
+                                }
+                                break;
+                            } // disappear
+                            Shunt::StartFunc(name, p) => {
+                                self.push(Soken::FuncCall(name, args), p);
+                                break;
+                            }
+                            Shunt::Op(prec, p) => {
+                                self.push(Soken::Binop(BinaryOp::from_number(prec)), p);
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    let (prec, p) = self.parse_oper();
+                    while let Some(e) = op_stack.last() {
+                        match e {
+                            Shunt::StartParen(_) => break,
+                            Shunt::StartFunc(_, _) => break,
+                            Shunt::Comma => break,
+                            &Shunt::Op(o_prec, o_p) => {
+                                if o_prec > prec {
+                                    op_stack.pop();
+                                    self.push(Soken::Binop(BinaryOp::from_number(o_prec)), o_p);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if prec == -1 {
+                        return;
+                    }
+                    self.eat();
+                    op_stack.push(Shunt::Op(prec, p));
+                }
+            }
+        }
+    }
+
+    /// doesn't eat end of expression
+    fn parse_expr1(&mut self) {
         // TODO: add prefix unary operator parsing here
         self.parse_primary();
         self.parse_binop_and_right(0)

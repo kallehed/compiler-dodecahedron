@@ -23,8 +23,6 @@ fn main() {
 
     if 45 {
         print_int(1+3*3*3*3+4+5);
-    } else {
-        print_int(5*3+2*3+5);
     }
 
     fibb(1000000, 0, 1);

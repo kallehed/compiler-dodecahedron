@@ -179,15 +179,12 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         if add_scope_start_soken {
             self.push(Soken::ScopeStart, p);
         }
-
-        self.parse_scope();
-
-        let p = eat_require!(
-            self,
-            Token::Keyword(Keyword::EndBlock),
-            "Expected `}` at end of scope"
-        );
-        self.push(Soken::ScopeEnd, p);
+        // let p = eat_require!(
+        //     self,
+        //     Token::Keyword(Keyword::EndBlock),
+        //     "Expected `}` at end of scope"
+        // );
+        // self.push(Soken::ScopeEnd, p);
     }
     // expects semicolon and pushes EndStat Soken
     fn require_semicolon(&mut self, push: bool) {
@@ -300,7 +297,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.parse_scope_require_start_brace(true); // notice no eating!
                 }
                 Token::Keyword(Keyword::EndBlock) => {
-                    return; // should be return? Idk, maybe break
+                    self.eat();
+                    self.push(Soken::ScopeEnd, place);
                 }
                 // Function call, or just expression
                 &Token::Identifier(_) | Token::Int(_) | Token::String(_) => {

@@ -9,6 +9,7 @@ fn main() {
         let c = 3 + b - b * a * 2;
         print_int(a + b + c);
     }
+
     if 0 {
         print_int(69);
     }

@@ -167,10 +167,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         std::process::exit(1);
     }
 
-    /// parses scope that has to start with { brace, eats last }
-    /// outputs { and } sokens
-    fn parse_scope_require_start_brace(&mut self, add_scope_start_soken: bool) {
-        // must be { after this
+    /// require {
+    fn require_start_brace(&mut self, add_scope_start_soken: bool) {
         let p = eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
@@ -179,12 +177,6 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         if add_scope_start_soken {
             self.push(Soken::ScopeStart, p);
         }
-        // let p = eat_require!(
-        //     self,
-        //     Token::Keyword(Keyword::EndBlock),
-        //     "Expected `}` at end of scope"
-        // );
-        // self.push(Soken::ScopeEnd, p);
     }
     // expects semicolon and pushes EndStat Soken
     fn require_semicolon(&mut self, push: bool) {
@@ -259,7 +251,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                     }
                     self.functions.insert(func_name, args);
-                    self.parse_scope_require_start_brace(false);
+                    self.require_start_brace(false);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
@@ -277,14 +269,14 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.eat();
                     self.parse_expr();
                     self.push(Soken::If, place);
-                    self.parse_scope_require_start_brace(false);
+                    self.require_start_brace(false);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
                     self.push(Soken::While, place);
-                    self.parse_scope_require_start_brace(false);
+                    self.require_start_brace(false);
                 }
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
@@ -294,7 +286,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.require_semicolon(false);
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.parse_scope_require_start_brace(true); // notice no eating!
+                    self.require_start_brace(true); // notice no eating!
                 }
                 Token::Keyword(Keyword::EndBlock) => {
                     self.eat();

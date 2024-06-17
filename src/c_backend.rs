@@ -147,6 +147,9 @@ impl State<'_> {
                     self.print_first_on_stack();
                     self.print("){");
                 }
+                S::Else => {
+                    self.print("else{");
+                }
                 S::While => {
                     self.print("while(");
                     self.print_first_on_stack();

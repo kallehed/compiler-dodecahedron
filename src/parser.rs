@@ -66,6 +66,7 @@ pub enum Soken {
     FuncCall(IdentIdx, u16),
     /// expects three
     If,
+    Else,
     /// expects two
     While,
     /// {, standalone
@@ -168,7 +169,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     }
 
     /// require {
-    fn require_start_brace(&mut self, add_scope_start_soken: bool) {
+    fn new_scope(&mut self, add_scope_start_soken: bool) {
         let p = eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
@@ -177,6 +178,13 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         if add_scope_start_soken {
             self.push(Soken::ScopeStart, p);
         }
+        self.parse_scope();
+        let p = eat_require!(
+            self,
+            Token::Keyword(Keyword::EndBlock),
+            "Expected `}` after scope"
+        );
+        self.push(Soken::ScopeEnd, p);
     }
     // expects semicolon and pushes EndStat Soken
     fn require_semicolon(&mut self, push: bool) {
@@ -251,7 +259,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                     }
                     self.functions.insert(func_name, args);
-                    self.require_start_brace(false);
+                    self.new_scope(false);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
@@ -266,17 +274,23 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 }
                 // If statement
                 Token::Keyword(Keyword::If) => {
+                    self.push(Soken::If, place);
                     self.eat();
                     self.parse_expr();
-                    self.push(Soken::If, place);
-                    self.require_start_brace(false);
+                    self.new_scope(false);
+                    let (else_p, &pos_else) = self.peek();
+                    if matches!(pos_else, Token::Keyword(Keyword::Else)) {
+                        self.push(Soken::Else, else_p);
+                        self.eat();
+                        self.new_scope(false);
+                    }
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
                     self.push(Soken::While, place);
-                    self.require_start_brace(false);
+                    self.new_scope(false);
                 }
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
@@ -286,11 +300,10 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.require_semicolon(false);
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.require_start_brace(true); // notice no eating!
+                    self.new_scope(true); // notice no eating!
                 }
                 Token::Keyword(Keyword::EndBlock) => {
-                    self.eat();
-                    self.push(Soken::ScopeEnd, place);
+                    return;
                 }
                 // Function call, or just expression
                 &Token::Identifier(_) | Token::Int(_) | Token::String(_) => {

@@ -16,17 +16,6 @@ enum StackItem {
     Var,
     Unit,
 }
-/// scope {} data
-struct Scope {
-    // how many vars were created in this scope?
-    vars: usize,
-    returns: bool,
-    /// if a normal block {} returns, the outer block returns as well
-    propogates_return: bool,
-    /// is function body
-    must_return: bool,
-    name: IdentIdx,
-}
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
 struct State<'b> {
@@ -36,9 +25,6 @@ struct State<'b> {
     vars: HashSet<IdentIdx>,
     // each scope holds how many vars it creates, they are added here and removed from self.vars after scope ends
     ordered_vars: Vec<IdentIdx>,
-    scopes: Vec<Scope>,
-    /// holds values, args and stuff, with their soken idx
-    stack: Vec<(StackItem, SokIdx)>,
     sokens: &'b mut [Soken],
     /// map from index of soken to it's token index in source file
     origins: &'b [usize],
@@ -69,8 +55,6 @@ pub fn run<'a>(
     let mut s = State {
         vars: HashSet::new(),
         ordered_vars: Vec::new(),
-        scopes: Vec::new(),
-        stack: Vec::new(),
         sokens,
         origins,
         si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
@@ -92,36 +76,6 @@ impl State<'_> {
         self.sokens[self.si.0]
     }
 
-    /// stack pop, get item, and where it originated from sokens
-    fn spop(&mut self) -> (StackItem, SokIdx) {
-        self.stack.pop().unwrap()
-    }
-    /// stack push item, including `i`, soken index it comes from
-    fn spush(&mut self, it: StackItem) {
-        self.stack.push((it, self.si));
-    }
-    /// internal logic assertion on nbr of items on stack
-    fn sexpect(&mut self, items: usize) {
-        if self.stack.len() != items {
-            println!();
-            self.report_error(&format!(
-                "INTERNAL AST_VERIFY ERROR: got {} stackitems, but wants {}",
-                self.stack.len(),
-                items
-            ));
-        }
-    }
-    fn sexpect_clear(&mut self, items: usize) {
-        self.sexpect(items);
-        self.stack.clear();
-    }
-    fn sexpect_int(&mut self, msg: &str) -> (StackItem, SokIdx) {
-        let ret_val = self.spop();
-        if let StackItem::Unit = ret_val.0 {
-            self.report_error(msg);
-        }
-        ret_val
-    }
     /// add var, also send token index of soken of var, uses implicit si
     fn add_var(&mut self, name: IdentIdx) {
         if !self.vars.insert(name) {
@@ -130,15 +84,6 @@ impl State<'_> {
         // if global scope contains it, this can't (can't assert bc Vector::push)
         self.scopes.last_mut().unwrap().vars += 1;
         self.ordered_vars.push(name);
-    }
-    fn create_scope(&mut self, propogates_return: bool, must_return: bool, name: IdentIdx) {
-        self.scopes.push(Scope {
-            returns: false,
-            vars: 0,
-            propogates_return,
-            must_return,
-            name,
-        });
     }
     /// What it does:
     /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
@@ -155,18 +100,13 @@ impl State<'_> {
         loop {
             use Soken as S;
             match self.eat() {
-                S::EndStat => {
-                    self.sexpect_clear(1); // throw away 1 stack item
-                }
                 // Could be better abstracted, to be able to receive items or not care
                 S::Return => {
-                    self.sexpect(1);
-                    self.sexpect_int("Return value must be Int");
-                    // signal that this scope returns
-                    self.scopes.last_mut().unwrap().returns = true;
+                    let res = self.verify_expr();
+                    self.is_int(res);
+                    returns = true;
                 }
                 S::CreateVar(name) => {
-                    self.sexpect(0);
                     self.add_var(name);
                 }
                 // basically just create arg variables
@@ -185,9 +125,14 @@ impl State<'_> {
                     }
                 }
                 S::If => {
-                    self.sexpect(1);
-                    self.sexpect_int("If condition must be Int");
-                    self.create_scope(false, false, 0); // don't know if reached
+                    let typ = self.verify_expr();
+                    self.is_int(typ);
+                    let asd = self.eat();
+                    assert_starblock(asd);
+                }
+                S::Else => {
+                    self.sexpect(0);
+                    self.create_scope(false, false, 0);
                 }
                 S::While => {
                     self.sexpect(1);
@@ -219,95 +164,104 @@ impl State<'_> {
                         self.scopes.last_mut().unwrap().returns |= outer_scope_returns;
                     }
                 }
-                // HERE BEGINS EXPR SOKENS
-                S::Int(_) => self.spush(StackItem::LitInt),
-                // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
-                S::Var(e) => {
-                    if !self.vars.contains(&e) {
-                        self.report_error("Variable used before declaration");
-                    }
-                    self.spush(StackItem::Var);
-                }
-
-                // CALL to ALREADY EXISTING function
-                S::FuncCall(name, supposed_args) => {
-                    // make sure function called with correct nr of arguments
-                    if let Some(&args) = self.functions.get(&name) {
-                        if args != supposed_args {
-                            self.report_error(&format!(
-                                "Function should be called with {} arg(s), got {}",
-                                args, supposed_args
-                            ));
-                        }
-                    } else {
-                        self.report_error(&format!(
-                            "Function `{}` does not exist",
-                            self.ident_idx_to_string[name as usize]
-                        ));
-                    }
-                    // drop supposed_args amount of arguments
-                    for _ in 0..supposed_args {
-                        self.spop();
-                    }
-                    self.spush(StackItem::UnkownInt); // add unknown stack element, because we don't know what the function returns
-                }
-                // make sure that setters have a left l-value,
-                // if regular binop, constant propogate ints
-                S::Binop(binop) => {
-                    // self.sexpect(2, "binop needs two values");
-                    let right = self.sexpect_int("Can't do binop on Unit");
-                    let left = self.sexpect_int("Can't do binop on Unit");
-
-                    use BinaryOp as B;
-                    match binop {
-                        B::SetAdd | B::SetSub | B::Set => {
-                            // `left` has to be ident, ERROR
-                            if !matches!(left.0, StackItem::Var) {
-                                self.report_error( "Left hand side of setter can't be expression, must be variable name")
-                            }
-                            self.spush(StackItem::Unit); // setting returns Unit
-                        }
-                        B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
-                            // constant propogation
-                            if let (StackItem::LitInt, StackItem::LitInt) = (left.0, right.0) {
-                                // get values
-                                let l = match self.sokens[left.1 .0] {
-                                    Soken::Int(e) => self.int_stor.get(e),
-                                    _ => unreachable!(),
-                                };
-                                let r = match self.sokens[right.1 .0] {
-                                    Soken::Int(e) => self.int_stor.get(e),
-                                    _ => unreachable!(),
-                                };
-                                // bc rust semantics we do wrapping_add etc
-                                let res = match binop {
-                                    B::Eql => (l == r) as Int,
-                                    B::Les => (l < r) as Int,
-                                    B::Mor => (l > r) as Int,
-                                    B::Add => l.wrapping_add(r),
-                                    B::Sub => l.wrapping_sub(r),
-                                    B::Mul => l.wrapping_mul(r),
-                                    _ => unreachable!(),
-                                };
-                                let new_idx = self.int_stor.insert_num_get_idx(res);
-
-                                self.sokens[left.1 .0] = Soken::Nil;
-                                self.sokens[right.1 .0] = Soken::Nil;
-                                self.sokens[self.si.0] = Soken::Int(new_idx); // propogation
-                                self.spush(StackItem::LitInt);
-                            } else {
-                                self.spush(StackItem::UnkownInt); // one is either unknown or variable -> Var
-                            }
-                        }
-                    }
+                _ => {
+                    panic!("wrong Soken in ast_verify, probably got Int even though at statement level");
                 }
                 S::Nil => {
-                    unreachable!("ast won't contain nil after parsing, so impossible")
+                    unreachable!("ast won't contain nil after parsing, so impossible");
                 }
             }
             // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
             if self.si.0 + 1 >= self.sokens.len() {
                 break;
+            }
+        }
+    }
+
+    // HERE BEGINS EXPR SOKENS
+    fn verify_expr(&mut self) -> StackItem {
+        use Soken as S;
+        match self.eat() {
+            S::Int(_) => self.spush(StackItem::LitInt),
+            // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
+            S::Var(e) => {
+                if !self.vars.contains(&e) {
+                    self.report_error("Variable used before declaration");
+                }
+                self.spush(StackItem::Var);
+            }
+
+            // CALL to ALREADY EXISTING function
+            S::FuncCall(name, supposed_args) => {
+                // make sure function called with correct nr of arguments
+                if let Some(&args) = self.functions.get(&name) {
+                    if args != supposed_args {
+                        self.report_error(&format!(
+                            "Function should be called with {} arg(s), got {}",
+                            args, supposed_args
+                        ));
+                    }
+                } else {
+                    self.report_error(&format!(
+                        "Function `{}` does not exist",
+                        self.ident_idx_to_string[name as usize]
+                    ));
+                }
+                // drop supposed_args amount of arguments
+                for _ in 0..supposed_args {
+                    self.spop();
+                }
+                self.spush(StackItem::UnkownInt); // add unknown stack element, because we don't know what the function returns
+            }
+            // make sure that setters have a left l-value,
+            // if regular binop, constant propogate ints
+            S::Binop(binop) => {
+                // self.sexpect(2, "binop needs two values");
+                let right = self.sexpect_int("Can't do binop on Unit");
+                let left = self.sexpect_int("Can't do binop on Unit");
+
+                use BinaryOp as B;
+                match binop {
+                    B::SetAdd | B::SetSub | B::Set => {
+                        // `left` has to be ident, ERROR
+                        if !matches!(left.0, StackItem::Var) {
+                            self.report_error( "Left hand side of setter can't be expression, must be variable name")
+                        }
+                        self.spush(StackItem::Unit); // setting returns Unit
+                    }
+                    B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
+                        // constant propogation
+                        if let (StackItem::LitInt, StackItem::LitInt) = (left.0, right.0) {
+                            // get values
+                            let l = match self.sokens[left.1 .0] {
+                                Soken::Int(e) => self.int_stor.get(e),
+                                _ => unreachable!(),
+                            };
+                            let r = match self.sokens[right.1 .0] {
+                                Soken::Int(e) => self.int_stor.get(e),
+                                _ => unreachable!(),
+                            };
+                            // bc rust semantics we do wrapping_add etc
+                            let res = match binop {
+                                B::Eql => (l == r) as Int,
+                                B::Les => (l < r) as Int,
+                                B::Mor => (l > r) as Int,
+                                B::Add => l.wrapping_add(r),
+                                B::Sub => l.wrapping_sub(r),
+                                B::Mul => l.wrapping_mul(r),
+                                _ => unreachable!(),
+                            };
+                            let new_idx = self.int_stor.insert_num_get_idx(res);
+
+                            self.sokens[left.1 .0] = Soken::Nil;
+                            self.sokens[right.1 .0] = Soken::Nil;
+                            self.sokens[self.si.0] = Soken::Int(new_idx); // propogation
+                            self.spush(StackItem::LitInt);
+                        } else {
+                            self.spush(StackItem::UnkownInt); // one is either unknown or variable -> Var
+                        }
+                    }
+                }
             }
         }
     }

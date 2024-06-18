@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::lexer::Token;
+use crate::lexer::{IntIdx, Token};
 use crate::IdentIdx;
 use crate::Keyword;
 use crate::SetType;
@@ -41,7 +41,7 @@ impl BinaryOp {
     }
 }
 /// Semantic Token
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone)]
 pub enum Soken {
     /// used in ast verifyer to delete Soken's in constant propogation. Should not be used or referenced otherwise
     /// can be ignored in this file anyway
@@ -52,13 +52,15 @@ pub enum Soken {
     /// one
     Return,
     /// standalone, index into int_storage
-    Int(u16),
+    Int(IntIdx),
     /// standalone
     Var(IdentIdx),
     /// standalone
     CreateVar(IdentIdx),
     /// Name, lookup in hashmap how many args
     FuncDef(IdentIdx),
+    /// signals that function definition ended
+    EndFuncDef,
     /// two
     Binop(BinaryOp),
     /// Name and nr args
@@ -66,13 +68,15 @@ pub enum Soken {
     FuncCall(IdentIdx, u16),
     /// expects three
     If,
-    Else,
     /// expects two
     While,
-    /// {, standalone
-    ScopeStart,
-    /// }, standalone
-    ScopeEnd,
+    /// {, start basic boring scope
+    StartScope,
+    /// }, stops the current scope by removing it's variables
+    /// drop scope, not used by any later things
+    EndScope,
+    /// end of normal basic scope {...}, signals e.g. that if this one returns the outer one will too
+    DropScope,
 }
 
 struct Parser<'parser_lifetime> {
@@ -84,7 +88,7 @@ struct Parser<'parser_lifetime> {
     functions: HashMap<IdentIdx, u16>,
     // semantic tokens
     sokens: Vec<Soken>,
-    // parallel array of source code places for the sokens
+    // parallel array of index of Token we came from
     origins: Vec<usize>,
 
     // immutable:
@@ -169,14 +173,14 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     }
 
     /// require {
-    fn new_scope(&mut self, add_scope_start_soken: bool) {
+    fn new_scope(&mut self, add_scope_start_soken: bool) -> usize {
         let p = eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
             "Expected `{` at start of scope"
         );
         if add_scope_start_soken {
-            self.push(Soken::ScopeStart, p);
+            self.push(Soken::StartScope, p);
         }
         self.parse_scope();
         let p = eat_require!(
@@ -184,7 +188,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             Token::Keyword(Keyword::EndBlock),
             "Expected `}` after scope"
         );
-        self.push(Soken::ScopeEnd, p);
+        self.push(Soken::EndScope, p);
+        p
     }
     // expects semicolon and pushes EndStat Soken
     fn require_semicolon(&mut self, push: bool) {
@@ -259,7 +264,8 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         };
                     }
                     self.functions.insert(func_name, args);
-                    self.new_scope(false);
+                    let end_p = self.new_scope(false);
+                    self.push(Soken::EndFuncDef, end_p);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
@@ -274,23 +280,25 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 }
                 // If statement
                 Token::Keyword(Keyword::If) => {
-                    self.push(Soken::If, place);
                     self.eat();
                     self.parse_expr();
-                    self.new_scope(false);
-                    let (else_p, &pos_else) = self.peek();
+                    self.new_scope(true);
+                    let (_else_p, &pos_else) = self.peek();
                     if matches!(pos_else, Token::Keyword(Keyword::Else)) {
-                        self.push(Soken::Else, else_p);
                         self.eat();
-                        self.new_scope(false);
+                        self.new_scope(true);
+                    } else {
+                        self.push(Soken::StartScope, 0);
+                        self.push(Soken::EndScope, 0);
                     }
+                    self.push(Soken::If, place);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
                     self.eat();
                     self.parse_expr();
+                    self.new_scope(true);
                     self.push(Soken::While, place);
-                    self.new_scope(false);
                 }
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
@@ -300,7 +308,16 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.require_semicolon(false);
                 }
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.new_scope(true); // notice no eating!
+                    self.eat(); // eat return token
+                    self.push(Soken::StartScope, place);
+                    self.parse_scope();
+                    let p = eat_require!(
+                        self,
+                        Token::Keyword(Keyword::EndBlock),
+                        "Expected `}` after scope"
+                    );
+                    self.push(Soken::EndScope, p);
+                    self.push(Soken::DropScope, p);
                 }
                 Token::Keyword(Keyword::EndBlock) => {
                     return;

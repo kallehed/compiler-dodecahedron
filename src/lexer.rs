@@ -11,7 +11,7 @@ use crate::COMMENT_PREFIX;
 pub enum Token {
     // index into `str_storage` of Lexer
     String(u16),
-    Int(u16),
+    Int(IntIdx),
     Keyword(Keyword),
     Identifier(IdentIdx),
 }
@@ -54,11 +54,14 @@ pub struct IntStor {
     /// O(1) existance lookup
     exists: HashMap<Int, u16>,
 }
+#[derive(Debug, Copy, Clone)]
+pub struct IntIdx(u16);
+
 impl IntStor {
     /// doesn't allow duplicates, uses same index
-    pub fn insert_num_get_idx(&mut self, e: Int) -> u16 {
+    pub fn insert_num_get_idx(&mut self, e: Int) -> IntIdx {
         if let Some(&at) = self.exists.get(&e) {
-            at
+            IntIdx(at)
         } else {
             let at = self.int_storage.len();
             self.int_storage.push(e);
@@ -66,11 +69,11 @@ impl IntStor {
                 .try_into()
                 .expect("User program has too many ints, more than 65536");
             self.exists.insert(e, at);
-            at
+            IntIdx(at)
         }
     }
-    pub fn get(&self, idx: u16) -> Int {
-        self.int_storage[idx as usize]
+    pub fn get(&self, idx: IntIdx) -> Int {
+        self.int_storage[idx.0 as usize]
     }
 }
 

@@ -3,6 +3,7 @@ use parser::Soken;
 // mod asm_backend;
 mod ast_verify;
 mod c_backend;
+mod ir_gen;
 mod lexer;
 mod parser;
 
@@ -89,8 +90,11 @@ fn main() {
     println!("After verifying: {:?}", &sokens);
     eprintln!("nbr of sokens: {}", sokens.len());
     let total_sok_before_filter = sokens.len();
-    let nil_generated = sokens.iter().filter(|&&x| x == Soken::Nil).count();
-    let sokens: Vec<Soken> = sokens.into_iter().filter(|&e| Soken::Nil != e).collect();
+    let nil_generated = sokens.iter().filter(|&&x| matches!(x, Soken::Nil)).count();
+    let sokens: Vec<Soken> = sokens
+        .into_iter()
+        .filter(|&e| !matches!(e, Soken::Nil))
+        .collect();
     println!("'\nAfter filtering Nil: {:?}", &sokens);
     println!(
         "\n Nil generated: {}, {:.1}% of sokens",

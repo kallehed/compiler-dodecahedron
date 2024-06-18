@@ -41,6 +41,9 @@ impl BinaryOp {
     }
 }
 /// Semantic Token
+/// TODO: it has aligment 2, therefore we can move the `IdentIdx` to be Soken after
+/// this will bring down size from 6 to 2
+/// especially FuncCall is chonky
 #[derive(Debug, Copy, Clone)]
 pub enum Soken {
     /// used in ast verifyer to delete Soken's in constant propogation. Should not be used or referenced otherwise

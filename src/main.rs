@@ -114,6 +114,10 @@ fn main() {
             file.write_all(c_code.as_bytes()).unwrap();
         }
     }
+    // generate IR
+    {
+        let ir = ir_gen::get_ir(&sokens, &functions);
+    }
 
     // generate assembly (NASM)
     /*{

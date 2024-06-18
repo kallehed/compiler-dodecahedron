@@ -66,7 +66,7 @@ pub fn run<'a>(
         ordered_vars: Vec::new(),
         sokens,
         origins,
-        si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
+        si: SokIdx(0), // so it wraps to 0 at start, YES HANDLED CORRECTLY
         exprs: Vec::new(),
         scopes: Vec::new(),
 
@@ -83,10 +83,10 @@ pub fn run<'a>(
 
 impl State<'_> {
     fn eat(&mut self) -> Soken {
+        let s = self.sokens[self.si.0];
         self.si.0 = self.si.0.wrapping_add(1);
-        self.sokens[self.si.0]
+        s
     }
-
     /// add var, also send token index of soken of var, uses implicit si
     fn add_var(&mut self, name: IdentIdx) {
         if !self.vars.insert(name) {
@@ -113,7 +113,7 @@ impl State<'_> {
         loop {
             self.verify2();
             // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
-            if self.si.0 + 1 >= self.sokens.len() {
+            if self.si.0 >= self.sokens.len() {
                 break;
             }
         }

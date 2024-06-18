@@ -48,14 +48,23 @@ struct Lexer<'a> {
     single_char_repeatables: HashMap<char, Keyword>,
 }
 
+/// idx 0-255 are mapped directly to what number they are
+/// can only hold 65536 ints in total
 pub struct IntStor {
     /// shall only store unique Int
     int_storage: Vec<Int>,
     /// O(1) existance lookup
     exists: HashMap<Int, u16>,
 }
+/// idx into IntStor get method, can be constructed with 0-255 to get the number that the index is
 #[derive(Debug, Copy, Clone)]
 pub struct IntIdx(u16);
+impl IntIdx {
+    /// only 0-255 are okay to get for free, maps directly to the number it is
+    pub fn new(a: u8) -> IntIdx {
+        IntIdx(a as _)
+    }
+}
 
 impl IntStor {
     /// doesn't allow duplicates, uses same index
@@ -158,6 +167,9 @@ pub fn generate_tokens(
             single_char_repeatables,
         }
     };
+    for i in 0..256 {
+        lexer.int_stor.insert_num_get_idx(i);
+    }
     lexer.lex();
     let mut identifier_idx_to_string = vec![""; lexer.identifier_to_int.len()];
     for (&string, &ident) in lexer.identifier_to_int.iter() {

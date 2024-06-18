@@ -41,7 +41,7 @@ pub fn to_c_code(
 ) -> String {
     let mut s = State {
         sokens,
-        si: SokIdx(usize::MAX), // so it wraps to 0 at start, YES HANDLED CORRECTLY
+        si: SokIdx(0),
         stack: Vec::new(),
 
         c_declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
@@ -60,8 +60,9 @@ pub fn to_c_code(
 
 impl State<'_> {
     fn eat(&mut self) -> Soken {
+        let s = self.sokens[self.si.0];
         self.si.0 = self.si.0.wrapping_add(1);
-        self.sokens[self.si.0]
+        s
     }
     fn spop(&mut self) -> String {
         self.stack.pop().unwrap()
@@ -97,8 +98,7 @@ impl State<'_> {
     fn gen_c(&mut self) {
         loop {
             self.gen_c2();
-            // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
-            if self.si.0 + 1 >= self.sokens.len() {
+            if self.si.0 >= self.sokens.len() {
                 break;
             }
         }

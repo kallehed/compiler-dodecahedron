@@ -84,6 +84,9 @@ leaning to do the second, because it's in the same order as in C or assembly wou
 Though maybe if I do IR first it won't be neccessary?
 Though then the question becomes how the IR should look like...
 
+Why generate an IR (intermediate representation)? So you have the Sokens, which have the property that they can be errorchecked and whatever. They contain names. Not good for optimization. We need an IR so we can get something that is good at being lowered down to C/assembly/llvmIR without having to do weird nonsense like we gotta do with the Sokens.
+How should the IR look? It currently just has an infinite amount of "registers" which therefore hold both variables and inbetween expressions. Make it like Risc V idk.
+
 
 # Parsing and grammar of language
 Currently recursive descent that generates reverse polish notation type flat tree `Soken`'s
@@ -188,6 +191,8 @@ fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
 ->  [def f 2arg] [a] [b] [3] [ret] [}]  [a] [b] [def g 2arg] [1] [2] [call f 2arg] [4] [ret] [}]
 <FN_DEF> ::=  [func_def_ident] [ident]* <EXPR>* [}] [end_func_def]
 ```
+
+Fix unholy way I iterated over Sokens, made it so first 256 ints are free
 
 Making an API to look at this: TODO
 

@@ -135,7 +135,7 @@ impl State<'_> {
                 self.print("){");
             }
             //  } already printed
-            S::EndFuncDef => self.print_first_on_stack(),
+            S::EndFuncDef(_) => self.print_first_on_stack(),
             S::If => {
                 let (else_part, then_part, cond_part) = (self.spop(), self.spop(), self.spop());
                 self.print(&format!("if({cond_part}){then_part}else{else_part}"));

@@ -63,7 +63,7 @@ pub enum Soken {
     /// Name, lookup in hashmap how many args
     FuncDef(IdentIdx),
     /// signals that function definition ended
-    EndFuncDef,
+    EndFuncDef(IdentIdx),
     /// two
     Binop(BinaryOp),
     /// Name and nr args
@@ -268,7 +268,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     }
                     self.functions.insert(func_name, args);
                     let end_p = self.new_scope(false);
-                    self.push(Soken::EndFuncDef, end_p);
+                    self.push(Soken::EndFuncDef(func_name), end_p);
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;

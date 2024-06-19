@@ -30,6 +30,7 @@ pub struct FuncIdx(pub u16);
 pub struct IRFunc {
     pub params: u16,
     pub deadname: IdentIdx,
+    pub regs_used: u16,
 }
 
 /// turn into 2-byte bytecode
@@ -117,6 +118,7 @@ pub fn get_ir(
         s.func_array.push(IRFunc {
             params: args,
             deadname: name,
+            regs_used: 0,
         });
         s.ident_to_func_idx.insert(name, func_label);
     }
@@ -245,11 +247,13 @@ impl State<'_> {
                 let new_name = self.ident_to_func_idx[&name];
                 self.push_instr(Instr::FuncDef(new_name));
             }
-            Soken::EndFuncDef => {
+            Soken::EndFuncDef(name) => {
                 let func = self.scopes.pop().unwrap();
                 let our_scope = self.scopes.last_mut().unwrap();
                 our_scope.instrs.extend(func.instrs);
                 // FREE ALL THE REGISTERS, because not used between functions
+                let func_idx = self.ident_to_func_idx[&name];
+                self.func_array[func_idx.0 as usize].regs_used = self.free_reg;
                 self.free_reg = 0;
                 our_scope.instrs.push(Instr::EndFunc);
             }

@@ -8,7 +8,7 @@ use crate::{
 
 /// register name
 fn r_n(r: Reg) -> String {
-    format!("var{}", r)
+    format!("r{}", r)
 }
 /// label name
 fn l_n(l: Label) -> String {
@@ -82,8 +82,15 @@ pub fn gen_c(
                 }
                 c_code.push_str("){");
                 c_declarations.push_str(");");
-                for i in func.params..170 {
-                    c_code.push_str(&format!("int64_t {};", r_n(i)));
+                if func.regs_used - func.params > 0 {
+                    c_code.push_str("int64_t ");
+                    for i in func.params..func.regs_used {
+                        if i != func.params {
+                            c_code.push(',');
+                        }
+                        c_code.push_str(&r_n(i));
+                    }
+                    c_code.push_str(";");
                 }
             }
             Instr::EndFunc => c_code.push('}'),

@@ -111,7 +111,6 @@ impl State<'_> {
     fn verify(&mut self) {
         loop {
             self.verify2();
-            // this is WEIRD, but bc we start at usize::MAX for `si` we have to do this at end
             if self.si.0 >= self.sokens.len() {
                 break;
             }
@@ -185,7 +184,7 @@ impl State<'_> {
                 let basic_scope = self.scopes.pop().unwrap();
                 self.scopes.last_mut().unwrap().returns |= basic_scope.returns;
             }
-            S::EndFuncDef => {
+            S::EndFuncDef(_) => {
                 // compile error if we did not return
                 let func_scope = self.scopes.pop().unwrap();
                 if !func_scope.returns {

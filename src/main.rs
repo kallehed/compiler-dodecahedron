@@ -5,6 +5,7 @@ mod ast_verify;
 mod c_backend;
 mod ir_gen;
 mod lexer;
+mod new_c_backend;
 mod parser;
 
 struct CompilerFlags {
@@ -55,24 +56,25 @@ fn main() {
         .leak();
 
     println!(" \n--- STARTING LEXING!");
-    let (tokens, token_idx_to_char_range, ident_idx_to_string, mut int_stor) =
+    let (tokens, token_idx_to_char_range, mut ident_idx_to_string, mut int_stor) =
         lexer::generate_tokens(source, file_name);
     println!("tokens: {:?}", tokens);
+
+    // add print_int ident and get it's ident idx
+    let print_int_ident_idx =
+        if let Some(ident) = ident_idx_to_string.iter().position(|&x| x == "print_int") {
+            ident.try_into().unwrap()
+        } else {
+            let i = ident_idx_to_string.len();
+            ident_idx_to_string.push("print_int");
+            i.try_into().unwrap()
+        };
 
     println!(" \n--- STARTING PARSING!");
     let (mut sokens, origins, mut functions) =
         parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
 
-    // add print_int function to identifiers and to ident_to_name thing.
-    // TODO: fix having predefined functions by initially including them in the identifiers
-    // and having a mapping from them to identifiers. Then also add them to the functions
-    // hashmap, we could even define it before, and hand it to parser::parse, with predefined
-    // functions, so the user can't redefine print_int
-    {
-        if let Some(ident) = ident_idx_to_string.iter().position(|&x| x == "print_int") {
-            functions.insert(ident.try_into().unwrap(), 1); // takes one argument
-        }
-    }
+    functions.insert(print_int_ident_idx, 1); // takes one argument
 
     println!("\n FINAL AST: {:?}", &sokens);
 
@@ -116,7 +118,27 @@ fn main() {
     }
     // generate IR
     {
-        let ir = ir_gen::get_ir(&sokens, &functions);
+        let (ir, ir_functions, ident_to_func_idx) = ir_gen::get_ir(&sokens, &functions);
+        println!("\n\n IR: {:?}", ir);
+
+        // generate c from IR
+        {
+            let c_code = new_c_backend::gen_c(
+                &ir,
+                &ir_functions,
+                &int_stor,
+                ident_to_func_idx,
+                print_int_ident_idx,
+                &ident_idx_to_string,
+            );
+
+            println!("\n\n new C code: {:?}", c_code);
+            {
+                use std::io::Write;
+                let mut file = std::fs::File::create("out.c").unwrap();
+                file.write_all(c_code.as_bytes()).unwrap();
+            }
+        }
     }
 
     // generate assembly (NASM)

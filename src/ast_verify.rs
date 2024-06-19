@@ -104,9 +104,8 @@ impl State<'_> {
     }
 
     fn require_int(&mut self, expr: Expr, msg: &str) {
-        match expr {
-            Expr::Unit => self.report_error(msg),
-            _ => (),
+        if let Expr::Unit = expr {
+            self.report_error(msg);
         }
     }
     fn verify(&mut self) {

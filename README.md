@@ -192,8 +192,6 @@ fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
 <FN_DEF> ::=  [func_def_ident] [ident]* <EXPR>* [}] [end_func_def]
 ```
 
-Fix unholy way I iterated over Sokens, made it so first 256 ints are free
-
 Making an API to look at this: TODO
 
 # Troubles:

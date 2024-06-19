@@ -4,22 +4,36 @@ use crate::lexer::IntIdx;
 use crate::parser::Soken;
 use crate::IdentIdx;
 
-type Reg = u16;
+pub type Reg = u16;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Op {
     Add,
     Sub,
     Mul,
+    Mor,
+    Les,
+    Eql,
 }
 
 /// in instructions we will have labels
 /// could possibly have hashmap saying where on is
 /// can jump to them
-#[derive(Clone, Copy)]
-pub struct Label(u16);
+#[derive(Clone, Copy, Debug)]
+pub struct Label(pub u16);
 
-#[derive(Clone, Copy)]
+/// index into func_array
+#[derive(Clone, Copy, Debug)]
+pub struct FuncIdx(pub u16);
+
+/// data for a function in IR, gotten by indexing into func_array array
+pub struct IRFunc {
+    pub params: u16,
+    pub deadname: IdentIdx,
+}
+
+/// turn into 2-byte bytecode
+#[derive(Clone, Copy, Debug)]
 pub enum Instr {
     /// load value of one register into another
     LoadReg(Reg, Reg),
@@ -35,6 +49,12 @@ pub enum Instr {
     Label(Label),
     /// return from function, return value is reg
     Return(Reg),
+    /// start of function, could do some stuff with this
+    FuncDef(FuncIdx),
+    /// signals the end of function definition, useful in c_backend
+    EndFunc,
+    /// call .0 with register starting at .1 (look up how many args) put result into .2
+    Call(FuncIdx, Reg, Reg),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -55,6 +75,11 @@ struct State<'a> {
     /// you have a variable, what register was allocated to it?
     varname_to_reg: HashMap<IdentIdx, Reg>,
 
+    /// when looking at function in IR, get it's deadname or args
+    func_array: Vec<IRFunc>,
+    /// when find funccall in Sokens, get it's func_array idx
+    ident_to_func_idx: HashMap<IdentIdx, FuncIdx>,
+
     /// which register to use next? I need one
     free_reg: Reg,
     /// which label to use next
@@ -63,7 +88,10 @@ struct State<'a> {
     functions: &'a HashMap<IdentIdx, u16>,
 }
 
-pub fn get_ir(sokens: &[Soken], functions: &HashMap<IdentIdx, u16>) -> Vec<Instr> {
+pub fn get_ir(
+    sokens: &[Soken],
+    functions: &HashMap<IdentIdx, u16>,
+) -> (Vec<Instr>, Vec<IRFunc>, HashMap<IdentIdx, FuncIdx>) {
     let mut s = State {
         sokens,
         si: SokIdx(0),
@@ -72,6 +100,8 @@ pub fn get_ir(sokens: &[Soken], functions: &HashMap<IdentIdx, u16>) -> Vec<Instr
         stack: Vec::new(),
 
         varname_to_reg: HashMap::new(),
+        func_array: Vec::new(),
+        ident_to_func_idx: HashMap::new(),
 
         free_reg: 0,
         free_label: Label(0),
@@ -82,10 +112,18 @@ pub fn get_ir(sokens: &[Soken], functions: &HashMap<IdentIdx, u16>) -> Vec<Instr
         instrs: Vec::new(),
         expr_instr: Vec::new(),
     });
+    for (&name, &args) in functions.iter() {
+        let func_label = FuncIdx(s.func_array.len().try_into().unwrap());
+        s.func_array.push(IRFunc {
+            params: args,
+            deadname: name,
+        });
+        s.ident_to_func_idx.insert(name, func_label);
+    }
     s.gen_ir();
     let final_scope = s.scopes.pop().unwrap();
     assert_eq!(0, s.scopes.len());
-    final_scope.instrs
+    (final_scope.instrs, s.func_array, s.ident_to_func_idx)
 }
 
 impl State<'_> {
@@ -93,14 +131,6 @@ impl State<'_> {
         let s = self.sokens[self.si.0];
         self.si.0 = self.si.0.wrapping_add(1);
         s
-    }
-    fn gen_ir(&mut self) {
-        loop {
-            self.gen_ir2();
-            if self.si.0 >= self.sokens.len() {
-                break;
-            }
-        }
     }
     fn push_instr(&mut self, instr: Instr) {
         self.scopes.last_mut().unwrap().instrs.push(instr);
@@ -119,19 +149,31 @@ impl State<'_> {
         self.free_label.0 += 1;
         ret
     }
+    fn gen_ir(&mut self) {
+        loop {
+            self.gen_ir2();
+            if self.si.0 >= self.sokens.len() {
+                break;
+            }
+        }
+    }
+    /// get's item of of stack, also pushes the expr_instrs to the real instructions
+    fn pop_expr(&mut self) -> Reg {
+        let our_scope = self.scopes.last_mut().unwrap();
+        our_scope.instrs.extend(&our_scope.expr_instr);
+        our_scope.expr_instr.clear();
+        self.stack.pop().unwrap()
+    }
     /// first implementation is dumb and uses same registers for 'constants' and
     /// variable values
     fn gen_ir2(&mut self) {
         match self.eat() {
             Soken::EndStat => {
                 // TODO: 'free' register?? (though not if variable...)
-                self.stack.pop().unwrap();
-                let our_scope = self.scopes.last_mut().unwrap();
-                our_scope.instrs.extend(&our_scope.expr_instr);
-                our_scope.expr_instr.clear();
+                self.pop_expr();
             }
             Soken::Return => {
-                let reg = self.stack.pop().unwrap();
+                let reg = self.pop_expr();
                 self.push_instr(Instr::Return(reg));
             }
             Soken::Int(intidx) => {
@@ -174,9 +216,9 @@ impl State<'_> {
                             B::Add => Op::Add,
                             B::Sub => Op::Sub,
                             B::Mul => Op::Mul,
-                            B::Eql => todo!(),
-                            B::Les => todo!(),
-                            B::Mor => todo!(),
+                            B::Eql => Op::Eql,
+                            B::Les => Op::Les,
+                            B::Mor => Op::Mor,
                             _ => unreachable!(),
                         };
                         self.push_e_instr(Instr::Op(reg, op, left, right));
@@ -186,37 +228,60 @@ impl State<'_> {
             }
             Soken::FuncDef(name) => {
                 let args = *self.functions.get(&name).unwrap();
+                // use up X amount of registers
                 for _ in 0..args {
-                    self.get_reg();
-                    self.eat();
+                    let reg = self.get_reg();
+                    let arg = self.eat();
+                    if let Soken::Var(ident) = arg {
+                        self.varname_to_reg.insert(ident, reg);
+                    } else {
+                        unreachable!()
+                    }
                 }
-                let func_start_label = self.get_label();
                 self.scopes.push(Scope {
                     instrs: Vec::new(),
                     expr_instr: Vec::new(),
                 });
-                self.push_instr(Instr::Label(func_start_label));
+                let new_name = self.ident_to_func_idx[&name];
+                self.push_instr(Instr::FuncDef(new_name));
             }
             Soken::EndFuncDef => {
                 let func = self.scopes.pop().unwrap();
                 let our_scope = self.scopes.last_mut().unwrap();
                 our_scope.instrs.extend(func.instrs);
+                // FREE ALL THE REGISTERS, because not used between functions
+                self.free_reg = 0;
+                our_scope.instrs.push(Instr::EndFunc);
             }
             Soken::FuncCall(name, nr_args) => {
                 // TODO get regs of the arguments and then assign to NEW regs, which will be range which function will be called with.
+                println!("at func call to {} with nr_args: {}", name, nr_args);
+                let mut args = Vec::new();
+                for _ in 0..nr_args {
+                    let arg_reg = self.stack.pop().unwrap();
+                    args.push(arg_reg);
+                    println!("arg_reg: {}", arg_reg);
+                }
+                let first_reg = self.get_reg();
+                let mut reg = first_reg;
+                while let Some(arg) = args.pop() {
+                    self.push_e_instr(Instr::LoadReg(reg, arg));
+                    reg = self.get_reg();
+                }
+                // reg will be one over, so can use that as the return place
+                let new_name = self.ident_to_func_idx[&name];
+                self.push_e_instr(Instr::Call(new_name, first_reg, reg));
+                self.stack.push(reg);
             }
             Soken::If => {
                 let else_scope = self.scopes.pop().unwrap();
                 let then_scope = self.scopes.pop().unwrap();
-                let cond_reg = self.stack.pop().unwrap();
 
                 let else_l = self.get_label();
                 let end_l = self.get_label();
 
+                let cond_reg = self.pop_expr();
                 let our_scope = self.scopes.last_mut().unwrap();
-
-                our_scope.instrs.extend(&our_scope.expr_instr);
-                our_scope.expr_instr.clear();
                 // generate jump instruction if we got false
                 our_scope.instrs.push(Instr::JumpRegZero(cond_reg, else_l));
                 our_scope.instrs.extend(&then_scope.instrs);
@@ -228,16 +293,14 @@ impl State<'_> {
             }
             Soken::While => {
                 let while_scope = self.scopes.pop().unwrap();
-                let cond_reg = self.stack.pop().unwrap();
 
                 let before = self.get_label();
                 let after = self.get_label();
 
                 let our_scope = self.scopes.last_mut().unwrap();
-
                 our_scope.instrs.push(Instr::Label(before));
-                our_scope.instrs.extend(&our_scope.expr_instr);
-                our_scope.expr_instr.clear();
+                let cond_reg = self.pop_expr();
+                let our_scope = self.scopes.last_mut().unwrap();
                 our_scope.instrs.push(Instr::JumpRegZero(cond_reg, after));
 
                 our_scope.instrs.extend(&while_scope.instrs);
@@ -245,12 +308,16 @@ impl State<'_> {
                 our_scope.instrs.push(Instr::Label(after));
             }
             Soken::StartScope => {
+                // TODO: Why do I create a new scope here, is it really necessary?
+                // Well yes, because If/While has to get the scope later
                 self.scopes.push(Scope {
                     instrs: Vec::new(),
                     expr_instr: Vec::new(),
                 });
             }
+            // TODO: free registers?
             Soken::EndScope => (),
+            // TODO: free registers?
             Soken::DropScope => {
                 self.scopes.pop().unwrap();
             }

@@ -87,6 +87,23 @@ Though then the question becomes how the IR should look like...
 Why generate an IR (intermediate representation)? So you have the Sokens, which have the property that they can be errorchecked and whatever. They contain names. Not good for optimization. We need an IR so we can get something that is good at being lowered down to C/assembly/llvmIR without having to do weird nonsense like we gotta do with the Sokens.
 How should the IR look? It currently just has an infinite amount of "registers" which therefore hold both variables and inbetween expressions. Make it like Risc V idk.
 
+How should the rust code be written? Currently I have `State` structs that hold 'global' information
+about the process of a pass (lexer, parser, verifyer, ir_gen) so I get a bunch of stuff from a func call
+put it all into my struct. Thus I have to write the types of the input THREE times. Also, when
+I am doing logic, I call a bunch of methods like: `self.get_expr` or `self.pop_stack` to do something
+in my `State` context. This always passes around a `State` pointer, and I usually hold EVERYTHING
+in this struct to remove friction of all the context needed as arguments. Though this doesn't feel
+very efficient. Also, because 99% of methods are like `fn XXX(&mut self, ...)` (they take mutable
+to Self), you can't do things like: self.XXX(self.YYY()), which is SUPER-annoying and destroys code
+readability somewhat.
+SOLUTION (bad/maybe good): make all the methods macros. The macros are defined in the function.
+This means they can refer to all the args of the function (some of the context), and ALSO variables (if the ma-
+cro is defined AFTER the variable). This is very nice. Though all of them will be inlined... which is also
+probably fine unless I want to to something complicated or weird assertion. THOUGH I could put function call
+into macro if I want to. (You can also do {} in macro to make block that returns thing, rust is very nice in that way, with returning blocks, like holy shit)
+Problem: Can't do recursion anymore.
+Problem: Macros are less typed
+
 
 # Parsing and grammar of language
 Currently recursive descent that generates reverse polish notation type flat tree `Soken`'s

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ir_gen::{FuncIdx, IRFunc, Instr, Label, Reg, InstrIterator},
+    ir::{Instr, FuncIdx, IRFunc, Label, Reg, InstrIterator},
     lexer::IntStor,
     IdentIdx,
 };
@@ -50,7 +50,7 @@ pub fn gen_c(
                 c_code.push_str(&format!("{}={};", r_n(to), the_int))
             }
             Instr::Op(to, op, left, right) => {
-                use crate::ir_gen::Op as O;
+                use crate::ir::Op as O;
                 let c_op = match op {
                     O::Add => "+",
                     O::Sub => "-",

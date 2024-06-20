@@ -60,6 +60,7 @@ TODO: Better errors, be able to show 2 locations (use when bad delimiters, also 
 How should the Soken's be iterated? Should I create some sort of abstraction around it to make the verifyer and the c backend simpler? But I don't want to lose performance, also don't want to lose readability of code (sequentiality), though readability already suffers a bit from reverse polish notation style expressions, bc have to express stuff backwards.
 
 How should the c backend concatinate expressions to produce a string C can understand? I have made 3 implementations: Bad slow 1 million String impl | Put everything on stack -> (Put stuff on another stack and iterate | recurse over items, where dependencies have been written in) (the one without any recursion is most lines) CURRENTLY: Create a million strings, this was deemed most maintanable, and it's the last step of the compiler, so it doesn't matter as much if it is slow?
+NEW VERSION: Instead generate C from IR, which solves all of this (Though IR generation is Vec heavy)
 
 Should the parser be de-recursified? Maybe could put all actions to do on a stack, though this would maybe make it overall less readable AND increase line-count. Could try an implementation.
 BAD IDEA - too hard to implement in shunting yard. Better to specify the correct behaviour imperatively than try to prohibit all bad behaviours. Recursive descent operator precedence parsing FTW.
@@ -67,6 +68,7 @@ BAD IDEA - too hard to implement in shunting yard. Better to specify the correct
 Instead of doing a bunch of stuff with the Soken's, maybe I should generate an IR. It could be 4 item IR like: `a = b 'op' c`. Set register to op of two registers.
 Problem: don't know how to call functions? Function call could specify at which register they begin, but seems weird, would also be weird if function call was variable length, though maybe could store that in separate buffer (which register values function is called with)
 Something like f(1+2,3) would be converted to $0 = i64 1; $1 = i64 2; $2 = $0 + $1; $3 = i64 3; call f with $2,$3, could have table that says which f uses, or we could create 2 more registers: $4 = $2, $5 = $3, and do `call f start at $4`, and we would know to use $4 and %5. (This example is dumb because in the original the registers get next to each other). We could also delay the setting of the registers to not have to create 2 new registers. So we do: $0 = i64 1; $1 = i64 2; THEN: $2 = $0 + $1; $3 = i64 3; call f from $2. Though this seems harder to implement, because have to wait for everything to evaluate to next-to-last, before setting last to register. So would have to have a stack or something. IMPORTANT: Don't overthink with structs, complicated stuff THIS LANGUAGE ONLY HAS i64!
+Other solution: Instead of specifying which register they start at, the function call could be followed by the registers used. You would look up how many args the function call takes, then take that many things of the IR. Could be implemented with the InstrIterator, so it returns some kind of slice containing the registers.
 
 How should stuff like if statements be represented in Sokens?
 
@@ -214,24 +216,47 @@ Making an API to look at this: TODO
 # IR
 2 byte alignment for all the things
 variable length encoding for different instructions
+Following format says how many 2bytes follow and and what they represent after each header 2byte
 
-LOADREG reg reg
-LOADINT reg int
-OP reg op reg reg
-JUMP label
-JumpRegZero reg label
-LABEL label
-RETURN reg
-FUNCDEF fnidx
-ENDFUNC
-CALL fnidx reg reg
+```
+    2
+LOAD_REG: reg reg
 
+    2
+LOAD_INT: reg int
+
+    3
+OP: reg op reg reg
+
+    1
+JUMP: label
+
+    2
+JUMP_REG_ZERO: reg label
+
+    1
+LABEL: label
+
+    1
+RETURN: reg
+
+    1
+FUNC_DEF: fnidx
+
+    0
+END_FUNC:
+
+    3
+CALL: fnidx reg reg
+```
 
 # Troubles:
 On linux, when you run a program it is by default line buffered (input sent on \n),
 but when I tried to pipe input (./prog > lefile) the file got nothing.
 This was because piping changes the buffering so it only sends data when the buffer is full.
 This was fixed by calling `fflush(stdout)` at the end of _start
+
+Accidentally read the bytecode at a 1-index offset, leading to EVERYTHING getting misinterpreted , lead to un-debuggable segfault for some reason >:(.
 
 # OLD syntax
 ```

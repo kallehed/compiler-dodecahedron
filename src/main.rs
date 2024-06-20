@@ -1,6 +1,7 @@
 use parser::Soken;
 
 // mod asm_backend;
+mod ir;
 mod ast_verify;
 mod c_backend;
 mod ir_gen;
@@ -123,7 +124,7 @@ fn main() {
 
         // generate c from IR
         {
-            let mut iterator = ir_gen::InstrIterator::new(ir_bytecode);
+            let mut iterator = ir::InstrIterator::new(ir_bytecode);
             let c_code = new_c_backend::gen_c(
                 &mut iterator,
                 &ir_functions,

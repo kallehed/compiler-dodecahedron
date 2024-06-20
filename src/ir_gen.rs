@@ -33,11 +33,38 @@ pub struct IRFunc {
     pub regs_used: u16,
 }
 
-/// Because Instr is made up of chunks of u16, where if you look at the first one
-/// you can know the structure of the rest, we can optimize it's array layout
-/// by squishing everything into an array
+/// Because Instr is made up of chunks of u16, where if you look at the one you can know the structure of some after, we can optimize it's array layout by squishing everything into an array, this removes indexability though Hopefully we won't need to index the bytecode instrs, as we mostly iterate over them
 type ByteCode = u16;
 
+pub struct InstrIterator {
+    bytecode: Vec<ByteCode>,
+    at: usize,
+}
+/// take Vec of Bytecode, output nice Instr enum that you can match on 
+impl InstrIterator {
+    pub fn new(bytecode: Vec<ByteCode>) -> InstrIterator {
+        InstrIterator {bytecode, at: 0}
+    }
+}
+
+impl Iterator for InstrIterator {
+    type Item = Instr;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.at >= self.bytecode.len() {return None;}
+        let discriminator = self.bytecode[self.at];
+        let mut arr = [discriminator, 0,0,0,0];
+        let fake_instr: Instr = unsafe {std::mem::transmute(arr)};
+        let items = instr_get_items(fake_instr);
+        for i in 0..items {
+            arr[i + 1] = self.bytecode[self.at + 1 + i];
+        }
+        self.at += 1 + items; // move forward
+        let correct_instr: Instr = unsafe {std::mem::transmute(arr)};
+        Some(correct_instr)
+    }
+}
+
+/// add Instr to Vec of ByteCode
 fn instr_to_bytecode(instr: Instr, output: &mut Vec<ByteCode>) {
     // add 1 to items to make sure the variant gets in
     let items = instr_get_items(instr) + 1;
@@ -47,8 +74,23 @@ fn instr_to_bytecode(instr: Instr, output: &mut Vec<ByteCode>) {
         output.push(arr[item]);
     }
 }
+/// how many 2bytes is inside the variant
+fn instr_get_items(i: Instr) -> usize {
+    match i {
+        Instr::LoadReg(_, _) => 2,
+        Instr::LoadInt(_, _) => 2,
+        Instr::Op(_, _, _, _) => 4,
+        Instr::Jump(_) => 1,
+        Instr::JumpRegZero(_, _) => 2,
+        Instr::Label(_) => 1,
+        Instr::Return(_) => 1,
+        Instr::FuncDef(_) => 1,
+        Instr::EndFunc => 0,
+        Instr::Call(_, _, _) => 3,
+    }
+}
 
-/// turn into 2-byte bytecode
+/// High level overview of what an instruction is, will actually be represented as packed vec of ByteCode
 #[derive(Clone, Copy, Debug)]
 /// repr C makes sure everything is in same order (means we can serialize/deserialize instantly from bytecode to Instr)
 /// repr u16 means the discrimnator and everything is u16, so all elements should be u16's
@@ -75,44 +117,6 @@ pub enum Instr {
     EndFunc,
     /// call .0 with register starting at .1 (look up how many args) put result into .2
     Call(FuncIdx, Reg, Reg),
-}
-#[repr(packed)]
-enum SmallInstr {
-    /// load value of one register into another
-    LoadReg(Reg, Reg),
-    /// load Int into register
-    LoadInt(Reg, IntIdx),
-    // .0 = .2 `.1` .3
-    Op(Reg, Op, Reg, Reg),
-    /// jump to label
-    Jump(Label),
-    /// Jump if register is zero
-    JumpRegZero(Reg, Label),
-    /// label to which you could jump
-    Label(Label),
-    /// return from function, return value is reg
-    Return(Reg),
-    /// start of function, could do some stuff with this
-    FuncDef(FuncIdx),
-    /// signals the end of function definition, useful in c_backend
-    EndFunc,
-    /// call .0 with register starting at .1 (look up how many args) put result into .2
-    Call(FuncIdx, Reg, Reg),
-}
-/// how many 2bytes is inside the variant
-fn instr_get_items(i: Instr) -> usize {
-    match i {
-        Instr::LoadReg(_, _) => 2,
-        Instr::LoadInt(_, _) => 2,
-        Instr::Op(_, _, _, _) => 4,
-        Instr::Jump(_) => 1,
-        Instr::JumpRegZero(_, _) => 2,
-        Instr::Label(_) => 1,
-        Instr::Return(_) => 1,
-        Instr::FuncDef(_) => 1,
-        Instr::EndFunc => 0,
-        Instr::Call(_, _, _) => 3,
-    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -149,7 +153,7 @@ struct State<'a> {
 pub fn get_ir(
     sokens: &[Soken],
     functions: &HashMap<IdentIdx, u16>,
-) -> (Vec<Instr>, Vec<IRFunc>, HashMap<IdentIdx, FuncIdx>) {
+) -> (Vec<ByteCode>, Vec<IRFunc>, HashMap<IdentIdx, FuncIdx>) {
     let mut s = State {
         sokens,
         si: SokIdx(0),
@@ -203,8 +207,16 @@ impl State<'_> {
     fn extend_instr(&mut self, instrs: &[ByteCode]) {
         self.scopes.last_mut().unwrap().instrs.extend(instrs);
     }
+    /// push instruction that is part of temporary expression
     fn push_e_instr(&mut self, instr: Instr) {
         instr_to_bytecode(instr, &mut self.scopes.last_mut().unwrap().expr_instr);
+    }
+    /// get's item of of stack, also pushes the expr_instrs to the real instructions
+    fn pop_expr(&mut self) -> Reg {
+        let our_scope = self.scopes.last_mut().unwrap();
+        our_scope.instrs.extend(&our_scope.expr_instr);
+        our_scope.expr_instr.clear();
+        self.stack.pop().unwrap()
     }
 
     fn get_reg(&mut self) -> Reg {
@@ -225,15 +237,7 @@ impl State<'_> {
             }
         }
     }
-    /// get's item of of stack, also pushes the expr_instrs to the real instructions
-    fn pop_expr(&mut self) -> Reg {
-        let our_scope = self.scopes.last_mut().unwrap();
-        our_scope.instrs.extend(&our_scope.expr_instr);
-        our_scope.expr_instr.clear();
-        self.stack.pop().unwrap()
-    }
-    /// first implementation is dumb and uses same registers for 'constants' and
-    /// variable values
+    /// first implementation is dumb and uses same 'register' representationfor 'constants' and variable values
     fn gen_ir2(&mut self) {
         match self.eat() {
             Soken::EndStat => {

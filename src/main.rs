@@ -118,13 +118,14 @@ fn main() {
     }
     // generate IR
     {
-        let (ir, ir_functions, ident_to_func_idx) = ir_gen::get_ir(&sokens, &functions);
-        println!("\n\n IR: {:?}", ir);
+        let (ir_bytecode, ir_functions, ident_to_func_idx) = ir_gen::get_ir(&sokens, &functions);
+        println!("\n\n IR bytecode: {:?}", ir_bytecode);
 
         // generate c from IR
         {
+            let mut iterator = ir_gen::InstrIterator::new(ir_bytecode);
             let c_code = new_c_backend::gen_c(
-                &ir,
+                &mut iterator,
                 &ir_functions,
                 &int_stor,
                 ident_to_func_idx,

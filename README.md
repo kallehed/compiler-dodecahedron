@@ -211,6 +211,22 @@ fn f(a,b) {return 3} fn g(a,b) {f(1,2);return 4;}
 
 Making an API to look at this: TODO
 
+# IR
+2 byte alignment for all the things
+variable length encoding for different instructions
+
+LOADREG reg reg
+LOADINT reg int
+OP reg op reg reg
+JUMP label
+JumpRegZero reg label
+LABEL label
+RETURN reg
+FUNCDEF fnidx
+ENDFUNC
+CALL fnidx reg reg
+
+
 # Troubles:
 On linux, when you run a program it is by default line buffered (input sent on \n),
 but when I tried to pipe input (./prog > lefile) the file got nothing.

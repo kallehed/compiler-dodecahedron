@@ -24,6 +24,7 @@ pub fn gen_c(
     ident_idx_to_string: &[&'static str],
 ) -> String {
     let mut c_declarations = String::from("#include <stdio.h>\n#include <stdint.h>\n\n");
+    /// takes in FuncIdent
     macro_rules! f_n {
         ($f:expr) => {{
             let irfunc = &ir_functions[$f.0 as usize];
@@ -90,7 +91,7 @@ pub fn gen_c(
                         }
                         c_code.push_str(&r_n(i));
                     }
-                    c_code.push_str(";");
+                    c_code.push(';');
                 }
             }
             Instr::EndFunc => c_code.push('}'),

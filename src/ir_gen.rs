@@ -33,8 +33,27 @@ pub struct IRFunc {
     pub regs_used: u16,
 }
 
+/// Because Instr is made up of chunks of u16, where if you look at the first one
+/// you can know the structure of the rest, we can optimize it's array layout
+/// by squishing everything into an array
+type ByteCode = u16;
+
+fn instr_to_bytecode(instr: Instr, output: &mut Vec<ByteCode>) {
+    // add 1 to items to make sure the variant gets in
+    let items = instr_get_items(instr) + 1;
+    let arr: [ByteCode; 5] = unsafe { std::mem::transmute(instr) };
+    // println!("instr: {:?}, is array: {:?}", instr, arr);
+    for item in 0..items {
+        output.push(arr[item]);
+    }
+}
+
 /// turn into 2-byte bytecode
 #[derive(Clone, Copy, Debug)]
+/// repr C makes sure everything is in same order (means we can serialize/deserialize instantly from bytecode to Instr)
+/// repr u16 means the discrimnator and everything is u16, so all elements should be u16's
+/// WARNING: WHEN CHANGING ANYTHING, ALSO CHANGE BELOW FUNCTION, though compiler will warn on this so
+#[repr(u16, C)]
 pub enum Instr {
     /// load value of one register into another
     LoadReg(Reg, Reg),
@@ -57,13 +76,51 @@ pub enum Instr {
     /// call .0 with register starting at .1 (look up how many args) put result into .2
     Call(FuncIdx, Reg, Reg),
 }
+#[repr(packed)]
+enum SmallInstr {
+    /// load value of one register into another
+    LoadReg(Reg, Reg),
+    /// load Int into register
+    LoadInt(Reg, IntIdx),
+    // .0 = .2 `.1` .3
+    Op(Reg, Op, Reg, Reg),
+    /// jump to label
+    Jump(Label),
+    /// Jump if register is zero
+    JumpRegZero(Reg, Label),
+    /// label to which you could jump
+    Label(Label),
+    /// return from function, return value is reg
+    Return(Reg),
+    /// start of function, could do some stuff with this
+    FuncDef(FuncIdx),
+    /// signals the end of function definition, useful in c_backend
+    EndFunc,
+    /// call .0 with register starting at .1 (look up how many args) put result into .2
+    Call(FuncIdx, Reg, Reg),
+}
+/// how many 2bytes is inside the variant
+fn instr_get_items(i: Instr) -> usize {
+    match i {
+        Instr::LoadReg(_, _) => 2,
+        Instr::LoadInt(_, _) => 2,
+        Instr::Op(_, _, _, _) => 4,
+        Instr::Jump(_) => 1,
+        Instr::JumpRegZero(_, _) => 2,
+        Instr::Label(_) => 1,
+        Instr::Return(_) => 1,
+        Instr::FuncDef(_) => 1,
+        Instr::EndFunc => 0,
+        Instr::Call(_, _, _) => 3,
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
 
 struct Scope {
-    instrs: Vec<Instr>,
-    expr_instr: Vec<Instr>,
+    instrs: Vec<ByteCode>,
+    expr_instr: Vec<ByteCode>,
 }
 
 struct State<'a> {
@@ -124,6 +181,12 @@ pub fn get_ir(
     }
     s.gen_ir();
     let final_scope = s.scopes.pop().unwrap();
+    // {
+    //     for i in 0..1000 {
+    //         let mut output = Vec::new();
+    //         instr_to_bytecode(final_scope.instrs[i], &mut output);
+    //     }
+    // }
     assert_eq!(0, s.scopes.len());
     (final_scope.instrs, s.func_array, s.ident_to_func_idx)
 }
@@ -135,10 +198,13 @@ impl State<'_> {
         s
     }
     fn push_instr(&mut self, instr: Instr) {
-        self.scopes.last_mut().unwrap().instrs.push(instr);
+        instr_to_bytecode(instr, &mut self.scopes.last_mut().unwrap().instrs);
+    }
+    fn extend_instr(&mut self, instrs: &[ByteCode]) {
+        self.scopes.last_mut().unwrap().instrs.extend(instrs);
     }
     fn push_e_instr(&mut self, instr: Instr) {
-        self.scopes.last_mut().unwrap().expr_instr.push(instr);
+        instr_to_bytecode(instr, &mut self.scopes.last_mut().unwrap().expr_instr);
     }
 
     fn get_reg(&mut self) -> Reg {
@@ -255,7 +321,7 @@ impl State<'_> {
                 let func_idx = self.ident_to_func_idx[&name];
                 self.func_array[func_idx.0 as usize].regs_used = self.free_reg;
                 self.free_reg = 0;
-                our_scope.instrs.push(Instr::EndFunc);
+                self.push_instr(Instr::EndFunc);
             }
             Soken::FuncCall(name, nr_args) => {
                 // TODO get regs of the arguments and then assign to NEW regs, which will be range which function will be called with.
@@ -285,15 +351,14 @@ impl State<'_> {
                 let end_l = self.get_label();
 
                 let cond_reg = self.pop_expr();
-                let our_scope = self.scopes.last_mut().unwrap();
                 // generate jump instruction if we got false
-                our_scope.instrs.push(Instr::JumpRegZero(cond_reg, else_l));
-                our_scope.instrs.extend(&then_scope.instrs);
-                our_scope.instrs.push(Instr::Jump(end_l));
+                self.push_instr(Instr::JumpRegZero(cond_reg, else_l));
+                self.extend_instr(&then_scope.instrs);
+                self.push_instr(Instr::Jump(end_l));
 
-                our_scope.instrs.push(Instr::Label(else_l));
-                our_scope.instrs.extend(&else_scope.instrs);
-                our_scope.instrs.push(Instr::Label(end_l));
+                self.push_instr(Instr::Label(else_l));
+                self.extend_instr(&else_scope.instrs);
+                self.push_instr(Instr::Label(end_l));
             }
             Soken::While => {
                 let while_scope = self.scopes.pop().unwrap();
@@ -301,15 +366,13 @@ impl State<'_> {
                 let before = self.get_label();
                 let after = self.get_label();
 
-                let our_scope = self.scopes.last_mut().unwrap();
-                our_scope.instrs.push(Instr::Label(before));
+                self.push_instr(Instr::Label(before));
                 let cond_reg = self.pop_expr();
-                let our_scope = self.scopes.last_mut().unwrap();
-                our_scope.instrs.push(Instr::JumpRegZero(cond_reg, after));
+                self.push_instr(Instr::JumpRegZero(cond_reg, after));
 
-                our_scope.instrs.extend(&while_scope.instrs);
-                our_scope.instrs.push(Instr::Jump(before));
-                our_scope.instrs.push(Instr::Label(after));
+                self.extend_instr(&while_scope.instrs);
+                self.push_instr(Instr::Jump(before));
+                self.push_instr(Instr::Label(after));
             }
             Soken::StartScope => {
                 // TODO: Why do I create a new scope here, is it really necessary?

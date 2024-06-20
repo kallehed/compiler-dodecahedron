@@ -221,33 +221,44 @@ Following format says how many 2bytes follow and and what they represent after e
 ```
     2
 LOAD_REG: reg reg
+ -> .0 = .1
 
     2
 LOAD_INT: reg int
+ -> .0 = .1
 
     3
 OP: reg op reg reg
+ -> .0 = .2 `.1` .3
 
     1
 JUMP: label
+ -> jump to .0
 
     2
 JUMP_REG_ZERO: reg label
+ -> if .0==0: jump to .1
 
     1
 LABEL: label
+ -> .0:
 
     1
 RETURN: reg
+ -> return .0
 
     1
 FUNC_DEF: fnidx
+ -> fn_def with idx .0
 
     0
 END_FUNC:
+ -> end_func
 
     3
-CALL: fnidx reg reg
+CALL: reg fnidx reg*
+ -> call fn .1 with X many regs starting at .2, place result into .0
+  (get nbr of arguments though auxiliary ir_functions)
 ```
 
 # Troubles:
@@ -256,7 +267,7 @@ but when I tried to pipe input (./prog > lefile) the file got nothing.
 This was because piping changes the buffering so it only sends data when the buffer is full.
 This was fixed by calling `fflush(stdout)` at the end of _start
 
-Accidentally read the bytecode at a 1-index offset, leading to EVERYTHING getting misinterpreted , lead to un-debuggable segfault for some reason >:(.
+Accidentally read the bytecode at a 1-index offset, leading to EVERYTHING getting misinterpreted , lead to un-debuggable segfault for some reason >:(
 
 # OLD syntax
 ```

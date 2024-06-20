@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    ir::{Instr, FuncIdx, IRFunc, Label, Reg, InstrIterator},
+    ir::{FuncIdx, IRFunc, Instr, InstrIterator, Label, Reg},
     lexer::IntStor,
     IdentIdx,
 };
@@ -42,7 +42,7 @@ pub fn gen_c(
     ));
 
     let mut c_code = String::new();
-    for instr in ir {
+    while let Some(instr) = ir.next() {
         match instr {
             Instr::LoadReg(to, from) => c_code.push_str(&format!("{}={};", r_n(to), r_n(from))),
             Instr::LoadInt(to, intidx) => {
@@ -95,15 +95,16 @@ pub fn gen_c(
                 }
             }
             Instr::EndFunc => c_code.push('}'),
-            Instr::Call(fnidx, firstreg, to) => {
+            Instr::Call(to, fnidx, args) => {
                 c_code.push_str(&format!("{}={}(", r_n(to), f_n!(fnidx)));
-                let func = &ir_functions[fnidx.0 as usize];
-                for i in 0..func.params {
-                    c_code.push_str(&r_n(firstreg + i));
-                    if i == func.params - 1 {
-                        break;
+                // let func = &ir_functions[fnidx.0 as usize];
+                let mut first = true;
+                for &arg in args.iter() {
+                    if !first {
+                        c_code.push(',');
                     }
-                    c_code.push(',');
+                    c_code.push_str(&r_n(arg));
+                    first = false;
                 }
                 c_code.push_str(");");
             }

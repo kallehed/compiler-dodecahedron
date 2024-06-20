@@ -1,9 +1,9 @@
 use parser::Soken;
 
 // mod asm_backend;
-mod ir;
 mod ast_verify;
 mod c_backend;
+mod ir;
 mod ir_gen;
 mod lexer;
 mod new_c_backend;
@@ -120,11 +120,19 @@ fn main() {
     // generate IR
     {
         let (ir_bytecode, ir_functions, ident_to_func_idx) = ir_gen::get_ir(&sokens, &functions);
-        println!("\n\n IR bytecode: {:?}", ir_bytecode);
+        println!("\n\n IR bytecode:\n {:?}", ir_bytecode);
+
+        {
+            println!("\n\n IR Bytecode in more readable format:\n");
+            let mut iterator = ir::InstrIterator::new(ir_bytecode.clone(), &ir_functions);
+            while let Some(instr) = iterator.next() {
+                print!("{:?}, ", instr);
+            }
+        }
 
         // generate c from IR
         {
-            let mut iterator = ir::InstrIterator::new(ir_bytecode);
+            let mut iterator = ir::InstrIterator::new(ir_bytecode, &ir_functions);
             let c_code = new_c_backend::gen_c(
                 &mut iterator,
                 &ir_functions,

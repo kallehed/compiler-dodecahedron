@@ -19,7 +19,7 @@ pub fn gen_c(
     ir: &mut InstrIterator,
     ir_functions: &[IRFunc],
     intstor: &IntStor,
-    ident_to_func_idx: HashMap<IdentIdx, FuncIdx>,
+    ident_to_func_idx: &HashMap<IdentIdx, FuncIdx>,
     print_int_ident_idx: IdentIdx,
     ident_idx_to_string: &[&'static str],
 ) -> String {

@@ -109,6 +109,8 @@ Though then the question becomes how the IR should look like...
 Why generate an IR (intermediate representation)? So you have the Sokens, which have the property that they can be errorchecked and whatever. They contain names. Not good for optimization. We need an IR so we can get something that is good at being lowered down to C/assembly/llvmIR without having to do weird nonsense like we gotta do with the Sokens.
 How should the IR look? It currently just has an infinite amount of "registers" which therefore hold both variables and inbetween expressions. Make it like Risc V idk.
 
+Also on IR: IR has it's own indexing for functions, this is so you can index an array to get info about functions (params, regs_used). If I still used IdentIdx this would have to be a HashMap
+
 How should the rust code be written? Currently I have `State` structs that hold 'global' information
 about the process of a pass (lexer, parser, verifyer, ir_gen) so I get a bunch of stuff from a func call
 put it all into my struct. Thus I have to write the types of the input THREE times. Also, when
@@ -127,7 +129,6 @@ Problem: Can't do recursion anymore.
 Problem: Macros are less typed
 
 Why are the lexer tokens so big? They are 4 bytes, which means simple keywords like { or ( take 4 bytes (instead of the 1 byte they would take in utf8). How to fix? Solution: Store less things in the Tokens: Instead have separate array of things like identifiers, keywords... Though this does not mesh well with rust. Especially in our current case: Everything we hold in the Tokens are less than 2 bytes, this means we can have ONE parallel array, and use the same index into Token for the auxiliary array. Won't implement this now though, freezes the code.
-
 
 # Parsing and grammar of language
 Currently recursive descent that generates reverse polish notation type flat tree `Soken`'s

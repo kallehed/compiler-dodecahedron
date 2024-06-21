@@ -1,10 +1,10 @@
 use parser::Soken;
 
-// mod asm_backend;
 mod ast_verify;
 mod c_backend;
 mod ir;
 mod ir_gen;
+mod ir_interpreter;
 mod lexer;
 mod parser;
 
@@ -125,12 +125,13 @@ fn main() {
 
         // generate c from IR
         {
-            let mut iterator = ir::InstrIterator::new(ir_bytecode, &ir_functions);
+            // TODO: remove clones and make iterator have reference instead of ownership
+            let mut iterator = ir::InstrIterator::new(ir_bytecode.clone(), &ir_functions);
             let c_code = c_backend::gen_c(
                 &mut iterator,
                 &ir_functions,
                 &int_stor,
-                ident_to_func_idx,
+                &ident_to_func_idx,
                 print_int_ident_idx,
                 &ident_idx_to_string,
             );
@@ -142,6 +143,18 @@ fn main() {
                 let mut file = std::fs::File::create("out.c").unwrap();
                 file.write_all(c_code.as_bytes()).unwrap();
             }
+        }
+        // run ir interpreter
+        {
+            let mut iterator = ir::InstrIterator::new(ir_bytecode, &ir_functions);
+            ir_interpreter::interpret(
+                &mut iterator,
+                &ir_functions,
+                &int_stor,
+                &ident_to_func_idx,
+                print_int_ident_idx,
+                &ident_idx_to_string,
+            );
         }
     }
 

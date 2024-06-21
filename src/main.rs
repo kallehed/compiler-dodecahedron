@@ -6,7 +6,6 @@ mod c_backend;
 mod ir;
 mod ir_gen;
 mod lexer;
-mod new_c_backend;
 mod parser;
 
 struct CompilerFlags {
@@ -20,6 +19,8 @@ fn main() {
     // default name
 
     let mut file_name = "code.dode";
+
+    let (source_size, tokens_size, sokens_size, ir_size, c_code_size);
 
     // TODO: make compiler handle verbose flag
 
@@ -55,11 +56,13 @@ fn main() {
     let source: &'static mut str = std::fs::read_to_string(file_name)
         .expect("file does not exist!")
         .leak();
+    source_size = source.len();
 
     println!(" \n--- STARTING LEXING!");
     let (tokens, token_idx_to_char_range, mut ident_idx_to_string, mut int_stor) =
         lexer::generate_tokens(source, file_name);
     println!("tokens: {:?}", tokens);
+    tokens_size = std::mem::size_of_val(&tokens[..]);
 
     // add print_int ident and get it's ident idx
     let print_int_ident_idx =
@@ -74,6 +77,7 @@ fn main() {
     println!(" \n--- STARTING PARSING!");
     let (mut sokens, origins, mut functions) =
         parser::parse(&tokens, &token_idx_to_char_range, source, file_name);
+    sokens_size = std::mem::size_of_val(&sokens[..]);
 
     functions.insert(print_int_ident_idx, 1); // takes one argument
 
@@ -105,22 +109,11 @@ fn main() {
         (nil_generated as f64 / total_sok_before_filter as f64) * 100.0
     );
 
-    {
-        let c_code = c_backend::to_c_code(&sokens, &ident_idx_to_string, &functions, &int_stor);
-
-        println!("\n--- Now printing C code: \n");
-        println!("{}", c_code);
-
-        {
-            use std::io::Write;
-            let mut file = std::fs::File::create("out.c").unwrap();
-            file.write_all(c_code.as_bytes()).unwrap();
-        }
-    }
     // generate IR
     {
         let (ir_bytecode, ir_functions, ident_to_func_idx) = ir_gen::get_ir(&sokens, &functions);
         println!("\n\n IR bytecode:\n {:?}", ir_bytecode);
+        ir_size = std::mem::size_of_val(&ir_bytecode[..]);
 
         {
             println!("\n\n IR Bytecode in more readable format:\n");
@@ -133,7 +126,7 @@ fn main() {
         // generate c from IR
         {
             let mut iterator = ir::InstrIterator::new(ir_bytecode, &ir_functions);
-            let c_code = new_c_backend::gen_c(
+            let c_code = c_backend::gen_c(
                 &mut iterator,
                 &ir_functions,
                 &int_stor,
@@ -141,8 +134,9 @@ fn main() {
                 print_int_ident_idx,
                 &ident_idx_to_string,
             );
+            c_code_size = std::mem::size_of_val(&c_code[..]);
 
-            println!("\n\n new C code: {:?}", c_code);
+            println!("\n\n new C code: \n{:?}", c_code);
             {
                 use std::io::Write;
                 let mut file = std::fs::File::create("out.c").unwrap();
@@ -163,6 +157,10 @@ fn main() {
         file.write_all(asm.as_bytes()).unwrap();
     }
     }*/
+    println!(
+        "source_size: {}, tokens_size: {}, sokens_size: {}, ir_size: {}, c_code_size: {}",
+        source_size, tokens_size, sokens_size, ir_size, c_code_size
+    );
 }
 
 const COMMENT_PREFIX: char = '#';

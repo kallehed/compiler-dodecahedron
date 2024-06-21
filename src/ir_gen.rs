@@ -17,6 +17,17 @@ struct Scope {
     expr_instr: Vec<ByteCode>,
 }
 
+enum StackItem {
+    Unit,
+    NotYetPlacedInt(IntIdx),
+    S(SomeReg),
+}
+
+enum SomeReg {
+    Tmp(Reg),
+    Var(Reg),
+}
+
 struct State<'a> {
     sokens: &'a [Soken],
     si: SokIdx,
@@ -25,7 +36,7 @@ struct State<'a> {
     /// each scope holds two Vecs of instrs, exprs instrs will be appended onto the real instrs though
     scopes: Vec<Scope>,
     /// holds expr values,
-    stack: Vec<Reg>,
+    stack: Vec<StackItem>,
 
     /// you have a variable, what register was allocated to it?
     varname_to_reg: HashMap<IdentIdx, Reg>,
@@ -37,6 +48,8 @@ struct State<'a> {
 
     /// which register to use next? I need one
     free_reg: Reg,
+    // watermark of nbr of regs used in function
+    reg_func_watermark: Reg,
     /// which label to use next
     free_label: Label,
 
@@ -59,6 +72,7 @@ pub fn get_ir(
         ident_to_func_idx: HashMap::new(),
 
         free_reg: 0,
+        reg_func_watermark: 0,
         free_label: Label(0),
 
         functions,
@@ -85,14 +99,14 @@ pub fn get_ir(
 impl State<'_> {
     fn eat(&mut self) -> Soken {
         let s = self.sokens[self.si.0];
-        self.si.0 = self.si.0.wrapping_add(1);
+        self.si.0 += 1;
         s
     }
     fn extend_instr(&mut self, instr: &[ByteCode]) {
         self.scopes.last_mut().unwrap().instr.extend(instr);
     }
     /// get's item of of stack, also pushes the expr_instr to the real instructions
-    fn pop_expr(&mut self) -> Reg {
+    fn pop_expr(&mut self) -> StackItem {
         let our_scope = self.scopes.last_mut().unwrap();
         our_scope.instr.extend(&our_scope.expr_instr);
         our_scope.expr_instr.clear();
@@ -107,9 +121,38 @@ impl State<'_> {
         &mut self.scopes.last_mut().unwrap().instr
     }
 
+    /// make stackitem available as some kind of register
+    /// this turns a number into something that can be used
+    fn realize_stackitem(&mut self, s: StackItem, for_expr: bool) -> SomeReg {
+        match s {
+            StackItem::NotYetPlacedInt(intidx) => {
+                let reg = self.get_reg();
+                mk_load_int(if for_expr { self.e_i() } else { self.s_i() }, reg, intidx);
+                SomeReg::Tmp(reg)
+            }
+            StackItem::S(some) => some,
+            StackItem::Unit => unreachable!(),
+        }
+    }
+
+    /// says that register will be used now, but future computations can
+    /// reuse IF it was temporary
+    fn use_some_reg(&mut self, s: SomeReg) -> Reg {
+        match s {
+            SomeReg::Tmp(reg) => {
+                self.free_reg -= 1;
+                reg
+            }
+            SomeReg::Var(var) => var,
+        }
+    }
+
     fn get_reg(&mut self) -> Reg {
         let ret = self.free_reg;
         self.free_reg += 1;
+        if self.free_reg > self.reg_func_watermark {
+            self.reg_func_watermark = self.free_reg;
+        }
         ret
     }
     fn get_label(&mut self) -> Label {
@@ -127,25 +170,44 @@ impl State<'_> {
     }
     /// first implementation is dumb and uses same 'register' representation for 'constants' and variable values
     fn gen_ir2(&mut self) {
-        match self.eat() {
+        match {
+            let a = self.eat();
+            // println!("sok: {:?}", a);
+            a
+        } {
             Soken::EndStat => {
                 // TODO: 'free' register?? (though not if variable...)
-                self.pop_expr();
+                let our_scope = self.scopes.last_mut().unwrap();
+                our_scope.instr.extend(&our_scope.expr_instr);
+                our_scope.expr_instr.clear();
+                // if expr on stack exists, potentially free it's temp reg
+                match self.stack.pop().unwrap() {
+                    StackItem::NotYetPlacedInt(_) => (),
+                    StackItem::S(s) => match s {
+                        SomeReg::Tmp(_) => self.free_reg -= 1,
+                        SomeReg::Var(_) => (),
+                    },
+                    StackItem::Unit => (),
+                }
             }
             Soken::Return => {
-                let reg = self.pop_expr();
+                let stackitem = self.pop_expr();
+                let some_reg = self.realize_stackitem(stackitem, false);
+                let reg = self.use_some_reg(some_reg);
                 mk_return(self.s_i(), reg);
             }
             Soken::Int(intidx) => {
-                // mov int into register
-                let reg = self.get_reg();
-                mk_load_int(self.e_i(), reg, intidx);
-                self.stack.push(reg);
+                // don't be eager, could use less registers if we don't place the number into a register yet
+                self.stack.push(StackItem::NotYetPlacedInt(intidx))
             }
-            Soken::Var(varidx) => {
+            Soken::RVar(varidx) => {
+                let reg = self.varname_to_reg[&varidx];
+                self.stack.push(StackItem::S(SomeReg::Var(reg)))
+            }
+            Soken::LVar(varidx) => {
                 // maybe we can just push to the stack the reg with the variable?
                 let reg = self.varname_to_reg[&varidx];
-                self.stack.push(reg)
+                self.stack.push(StackItem::S(SomeReg::Var(reg)))
             }
             Soken::CreateVar(varidx) => {
                 // set a new free register to 0
@@ -156,6 +218,12 @@ impl State<'_> {
             Soken::Binop(binop) => {
                 let right = self.stack.pop().unwrap();
                 let left = self.stack.pop().unwrap();
+                // if both are numbers here, both will get their own temporary regs
+                let right = self.realize_stackitem(right, true);
+                let left = self.realize_stackitem(left, true);
+                // then the temporaries will be 'freed' here
+                let right = self.use_some_reg(right);
+                let left = self.use_some_reg(left);
                 use crate::parser::BinaryOp as B;
                 match binop {
                     // left HAS to be variable, so can assume this works
@@ -166,12 +234,13 @@ impl State<'_> {
                             B::Set => mk_load_reg(self.e_i(), left, right),
                             _ => unreachable!(),
                         };
-                        self.stack.push(left);
+                        // WHY IN THE WHOLE WORLD WOULD I RETURN AN EXPRESSION HERE?
+                        // it's gauranteed that nobody will use the result of a set-ing
+                        self.stack.push(StackItem::Unit);
                     }
                     // both could be variables, so don't overwrite any of them
                     // create new register
                     B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
-                        let reg = self.get_reg();
                         let op = match binop {
                             B::Add => Op::Add,
                             B::Sub => Op::Sub,
@@ -181,8 +250,10 @@ impl State<'_> {
                             B::Mor => Op::Mor,
                             _ => unreachable!(),
                         };
+                        // have to allocate a tmp register for result
+                        let reg = self.get_reg();
                         mk_op(self.e_i(), reg, op, left, right);
-                        self.stack.push(reg);
+                        self.stack.push(StackItem::S(SomeReg::Tmp(reg)));
                     }
                 }
             }
@@ -192,7 +263,7 @@ impl State<'_> {
                 for _ in 0..args {
                     let reg = self.get_reg();
                     let arg = self.eat();
-                    if let Soken::Var(ident) = arg {
+                    if let Soken::RVar(ident) = arg {
                         self.varname_to_reg.insert(ident, reg);
                     } else {
                         unreachable!()
@@ -211,25 +282,33 @@ impl State<'_> {
                 our_scope.instr.extend(func.instr);
                 // FREE ALL THE REGISTERS, because not used between functions
                 let func_idx = self.ident_to_func_idx[&name];
-                self.func_array[func_idx.0 as usize].regs_used = self.free_reg;
+                println!(
+                    "watermark at: {:?}, reg at: {:?}",
+                    self.reg_func_watermark, self.free_reg
+                );
+                self.func_array[func_idx.0 as usize].regs_used = self.reg_func_watermark;
                 self.free_reg = 0;
+                self.reg_func_watermark = 0;
                 mk_end_func(self.s_i());
             }
             Soken::FuncCall(name, nr_args) => {
-                println!("at func call to {} with nr_args: {}", name, nr_args);
                 let mut args = Vec::new();
                 for _ in 0..nr_args {
-                    let arg_reg = self.stack.pop().unwrap();
-                    args.push(arg_reg);
-                    println!("arg_reg: {}", arg_reg);
+                    let stackitem = self.stack.pop().unwrap();
+                    let some_reg = self.realize_stackitem(stackitem, true);
+                    args.push(some_reg);
                 }
-                args.reverse(); // bc get of stack means they are: 3 2 1 0
+                // bc get of stack means they are: 3 2 1 0
+                args.reverse();
 
+                // potentially free some regs
+                let args: Vec<_> = args.into_iter().map(|x| self.use_some_reg(x)).collect();
+
+                // good
                 let into_reg = self.get_reg();
                 let new_name = self.ident_to_func_idx[&name];
                 mk_call(self.e_i(), into_reg, new_name, &args);
-                // reg will be one over, so can use that as the return place
-                self.stack.push(into_reg);
+                self.stack.push(StackItem::S(SomeReg::Tmp(into_reg)));
             }
             Soken::If => {
                 let else_scope = self.scopes.pop().unwrap();
@@ -239,6 +318,8 @@ impl State<'_> {
                 let end_l = self.get_label();
 
                 let cond_reg = self.pop_expr();
+                let cond_reg = self.realize_stackitem(cond_reg, true);
+                let cond_reg = self.use_some_reg(cond_reg);
                 // generate jump instruction if we got false
                 mk_jump_req_zero(self.s_i(), cond_reg, else_l);
                 self.extend_instr(&then_scope.instr);
@@ -255,6 +336,8 @@ impl State<'_> {
 
                 mk_label(self.s_i(), before);
                 let cond_reg = self.pop_expr();
+                let cond_reg = self.realize_stackitem(cond_reg, true);
+                let cond_reg = self.use_some_reg(cond_reg);
                 mk_jump_req_zero(self.s_i(), cond_reg, after);
 
                 self.extend_instr(&while_scope.instr);

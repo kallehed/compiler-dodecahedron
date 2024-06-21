@@ -1,180 +1,116 @@
-use crate::lexer::IntStor;
-use crate::parser::Soken;
-use crate::{parser::BinaryOp, IdentIdx};
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Debug)]
-struct SokIdx(usize);
-struct State<'b> {
-    sokens: &'b [Soken],
-    si: SokIdx,
-    // C code stored hierarchically
-    stack: Vec<String>,
+use crate::{
+    ir::{FuncIdx, IRFunc, Instr, InstrIterator, Label, Reg},
+    lexer::IntStor,
+    IdentIdx,
+};
 
-    c_declarations: String,
-    // constant
-    int_stor: &'b IntStor,
-    functions: &'b HashMap<IdentIdx, u16>,
-    ident_idx_to_string: &'b [&'static str],
+/// register name
+fn r_n(r: Reg) -> String {
+    format!("r{}", r)
 }
-fn binop_to_c_name(op: BinaryOp) -> &'static str {
-    use BinaryOp as B;
-    match op {
-        B::SetAdd => "+=",
-        B::SetSub => "-=",
-        B::Set => "=",
-        B::Eql => "==",
-        B::Les => "<",
-        B::Mor => ">",
-        B::Add => "+",
-        B::Sub => "-",
-        B::Mul => "*",
-    }
+/// label name
+fn l_n(l: Label) -> String {
+    format!("label{}", l.0)
 }
 
-// check correctness of program + constant folding
-pub fn to_c_code(
-    sokens: &[Soken],
+pub fn gen_c(
+    ir: &mut InstrIterator,
+    ir_functions: &[IRFunc],
+    intstor: &IntStor,
+    ident_to_func_idx: HashMap<IdentIdx, FuncIdx>,
+    print_int_ident_idx: IdentIdx,
     ident_idx_to_string: &[&'static str],
-    functions: &HashMap<IdentIdx, u16>,
-    int_stor: &IntStor,
 ) -> String {
-    let mut s = State {
-        sokens,
-        si: SokIdx(0),
-        stack: Vec::new(),
+    let mut c_declarations = String::from("#include <stdio.h>\n#include <stdint.h>\n\n");
+    /// takes in FuncIdent
+    macro_rules! f_n {
+        ($f:expr) => {{
+            let irfunc = &ir_functions[$f.0 as usize];
+            let orig_name = ident_idx_to_string[irfunc.deadname as usize];
+            if orig_name == "main" {
+                String::from("main")
+            } else {
+                format!("func{}", $f.0)
+            }
+        }};
+    }
+    c_declarations.push_str(&format!(
+        "int64_t {}(int64_t x){{printf(\"%ld\\n\",x);}}\n",
+        f_n!(ident_to_func_idx[&print_int_ident_idx])
+    ));
 
-        c_declarations: "#include <stdio.h>\n#include <stdint.h> \n void print_int(int64_t x){printf(\"%ld\\n\", x);}\n".to_string(),
-        int_stor,
-        functions,
-        ident_idx_to_string,
-    };
-    s.stack.push(String::from(""));
-    s.gen_c();
-    let c_code = s.stack.pop().unwrap();
-    assert_eq!(s.stack.len(), 0);
+    let mut c_code = String::new();
+    while let Some(instr) = ir.next() {
+        match instr {
+            Instr::LoadReg(to, from) => c_code.push_str(&format!("{}={};", r_n(to), r_n(from))),
+            Instr::LoadInt(to, intidx) => {
+                let the_int = intstor.get(intidx);
+                c_code.push_str(&format!("{}={};", r_n(to), the_int))
+            }
+            Instr::Op(to, op, left, right) => {
+                use crate::ir::Op as O;
+                let c_op = match op {
+                    O::Add => "+",
+                    O::Sub => "-",
+                    O::Mul => "*",
+                    O::Mor => ">",
+                    O::Les => "<",
+                    O::Eql => "==",
+                };
+                c_code.push_str(&format!("{}={}{}{};", r_n(to), r_n(left), c_op, r_n(right)));
+            }
+            Instr::Jump(label) => c_code.push_str(&format!("goto {};", l_n(label))),
 
-    s.c_declarations.push_str(&c_code);
-    s.c_declarations
-}
-
-impl State<'_> {
-    fn eat(&mut self) -> Soken {
-        let s = self.sokens[self.si.0];
-        self.si.0 = self.si.0.wrapping_add(1);
-        s
-    }
-    fn spop(&mut self) -> String {
-        self.stack.pop().unwrap()
-    }
-    fn spush(&mut self, e: String) {
-        self.stack.push(e);
-    }
-    fn print(&mut self, s: &str) {
-        self.stack.last_mut().unwrap().push_str(s);
-    }
-    fn print_decl(&mut self, s: &str) {
-        self.c_declarations.push_str(s);
-    }
-    fn pr_both(&mut self, s: &str) {
-        self.print(s);
-        self.print_decl(s);
-    }
-    fn var_name(&self, name: IdentIdx) -> String {
-        format!("var{}", name)
-    }
-    fn func_name(&self, name: IdentIdx) -> String {
-        let real_name = self.ident_idx_to_string[name as usize];
-        match real_name {
-            "print_int" => "print_int".to_string(),
-            "main" => "main".to_string(),
-            _ => format!("func{}", name),
-        }
-    }
-    fn print_first_on_stack(&mut self) {
-        let e = self.spop();
-        self.print(&e);
-    }
-    fn gen_c(&mut self) {
-        loop {
-            self.gen_c2();
-            if self.si.0 >= self.sokens.len() {
-                break;
+            Instr::JumpRegZero(reg, label) => {
+                c_code.push_str(&format!("if (0=={}) goto {};", r_n(reg), l_n(label)))
             }
-        }
-    }
-    fn gen_c2(&mut self) {
-        use Soken as S;
-        match self.eat() {
-            S::EndStat => {
-                let expr = self.spop();
-                self.print(&format!("{};", expr));
-            }
-            S::Return => {
-                let expr = self.spop();
-                self.print(&format!("return {};", expr));
-            }
-            // initilize everything to 0
-            S::CreateVar(name) => {
-                self.print(&format!("int64_t {}=0;", self.var_name(name)));
-            }
-            S::FuncDef(name) => {
-                self.spush(String::new());
-                self.pr_both(&format!("int64_t {}(", self.func_name(name)));
-                let args = *self.functions.get(&name).unwrap();
-                for i in 0..args {
-                    if i != 0 {
-                        self.pr_both(",");
+            Instr::Label(label) => c_code.push_str(&format!("{}:", l_n(label))),
+            Instr::Return(reg) => c_code.push_str(&format!("return {};", r_n(reg))),
+            Instr::FuncDef(fnidx) => {
+                let func = &ir_functions[fnidx.0 as usize];
+                c_code.push_str(&format!("int64_t {}(", f_n!(fnidx)));
+                c_declarations.push_str(&format!("int64_t {}(", f_n!(fnidx)));
+                let mut first = true;
+                for i in 0..func.params {
+                    if !first {
+                        c_code.push(',');
+                        c_declarations.push(',');
                     }
-                    match self.eat() {
-                        Soken::Var(arg) => self.pr_both(&format!("int64_t {}", self.var_name(arg))),
-                        _ => unreachable!(),
+                    c_code.push_str(&format!("int64_t {}", r_n(i)));
+                    c_declarations.push_str(&format!("int64_t {}", r_n(i)));
+                    first = false;
+                }
+                c_code.push_str("){");
+                c_declarations.push_str(");");
+                if func.regs_used - func.params > 0 {
+                    c_code.push_str("int64_t ");
+                    for i in func.params..func.regs_used {
+                        if i != func.params {
+                            c_code.push(',');
+                        }
+                        c_code.push_str(&r_n(i));
                     }
+                    c_code.push(';');
                 }
-                self.print_decl(");");
-                self.print("){");
             }
-            //  } already printed
-            S::EndFuncDef(_) => self.print_first_on_stack(),
-            S::If => {
-                let (else_part, then_part, cond_part) = (self.spop(), self.spop(), self.spop());
-                self.print(&format!("if({cond_part}){then_part}else{else_part}"));
-            }
-            S::While => {
-                let (scope_part, cond_part) = (self.spop(), self.spop());
-                self.print(&format!("while({cond_part}){scope_part}"));
-            }
-            S::StartScope => self.spush(String::from("{")),
-            S::EndScope => self.print("}"),
-            S::DropScope => self.print_first_on_stack(),
-
-            // HERE BEGINS EXPR SOKENS
-            S::Int(intstor) => self.spush(self.int_stor.get(intstor).to_string()),
-            S::Var(e) => self.spush(self.var_name(e)),
-            // CALL to ALREADY EXISTING function
-            S::FuncCall(name, nbr_args) => {
-                let mut args = Vec::new();
-                for _ in 0..nbr_args {
-                    args.push(self.spop());
-                }
-                self.spush(self.func_name(name));
-                self.print("(");
-                for (i, arg) in args.into_iter().enumerate() {
-                    self.print(&arg);
-                    if i as u16 == nbr_args - 1 {
-                        break;
+            Instr::EndFunc => c_code.push('}'),
+            Instr::Call(to, fnidx, args) => {
+                c_code.push_str(&format!("{}={}(", r_n(to), f_n!(fnidx)));
+                // let func = &ir_functions[fnidx.0 as usize];
+                let mut first = true;
+                for &arg in args.iter() {
+                    if !first {
+                        c_code.push(',');
                     }
-                    self.print(",");
+                    c_code.push_str(&r_n(arg));
+                    first = false;
                 }
-                self.print(")");
-            }
-            S::Binop(binop) => {
-                let (right, left) = (self.spop(), self.spop());
-                self.spush(format!("({left}{}{right})", binop_to_c_name(binop)));
-            }
-            S::Nil => {
-                unreachable!("ast won't contain nil as they were filtered after ast_verify")
+                c_code.push_str(");");
             }
         }
     }
+    c_declarations.push_str(&c_code);
+    c_declarations
 }

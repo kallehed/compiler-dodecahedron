@@ -43,7 +43,27 @@ or use shorthand:
        a
 ```
 
-## Program correctness thoughts:
+# Structure and what things do:
+
+### lexer: lexer.rs
+Takes source file and outputs tokens
+Tokens could be identifiers (variable or function names) or keywords (if while { ( [ )
+### parser: parser.rs
+Takes tokens and outputs sokens (Semantic tokens)
+Recursive descent operator precedence parser that makes sure all the tokens fit the grammar
+of the language. The sokens represent the program in reverse polish notation, not only
+expressions, but also scopes/blocks/{}
+### verification: ast_verify.rs
+Takes Sokens and does type-checking, that-you-return checking, variable used before declaration.
+Also, turns RValues into LValues if they are next to setters (=,+=,-=)
+### ir generation: ir_gen.rs, ir.rs
+Generate IR (immediate representation) in the form of Vec<ByteCode>.
+ir_gen.rs uses functions prefixed with mk_ in ir.rs to generate bytecode.
+### c code generation: c_backend.rs
+Iterates over IR using `InstrIterator` from `ir.rs` and generates c code using it
+this c code contains a million goto's, because the IR is like assembly
+
+# Program correctness thoughts:
  - A variable can only be used after it has been created. It's lifetime cascades to child blocks. Variable shadowing may not happen in descendant blocks. OBVIOUS - VERY
    Implement this by keeping track of created variables and making sure that used variables have been declared before. Have a 'global' hashset and
    let each block have a Vec of their declared variables, and let a block remove it's variables after it has run out. Current version: each block has a 'nbr_of_locals', then we have hashset of variables, and also a Vec of variables which acts as a stack to remove from the hashset when gone from scope.
@@ -105,6 +125,8 @@ probably fine unless I want to to something complicated or weird assertion. THOU
 into macro if I want to. (You can also do {} in macro to make block that returns thing, rust is very nice in that way, with returning blocks, like holy shit)
 Problem: Can't do recursion anymore.
 Problem: Macros are less typed
+
+Why are the lexer tokens so big? They are 4 bytes, which means simple keywords like { or ( take 4 bytes (instead of the 1 byte they would take in utf8). How to fix? Solution: Store less things in the Tokens: Instead have separate array of things like identifiers, keywords... Though this does not mesh well with rust. Especially in our current case: Everything we hold in the Tokens are less than 2 bytes, this means we can have ONE parallel array, and use the same index into Token for the auxiliary array. Won't implement this now though, freezes the code.
 
 
 # Parsing and grammar of language

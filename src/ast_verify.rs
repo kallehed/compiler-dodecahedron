@@ -36,7 +36,8 @@ struct State<'b> {
     origins: &'b [usize],
     si: SokIdx,
 
-    exprs: Vec<Expr>,
+    /// expr stack with corresponding SokIdx
+    exprs: Vec<(Expr, SokIdx)>,
     scopes: Vec<Scope>,
 
     // not constant, because we can add new ints when constant propogation
@@ -84,7 +85,7 @@ pub fn run<'a>(
 impl State<'_> {
     fn eat(&mut self) -> Soken {
         let s = self.sokens[self.si.0];
-        self.si.0 = self.si.0.wrapping_add(1);
+        self.si.0 += 1;
         s
     }
     /// add var, also send token index of soken of var, uses implicit si
@@ -96,10 +97,12 @@ impl State<'_> {
         self.scopes.last_mut().unwrap().local_vars += 1;
         self.ordered_vars.push(name);
     }
+    /// WARNING: only use if the latest self.eat() you called is associated with the expr you are pushing, bc we will also push your self.si
     fn epush(&mut self, e: Expr) {
-        self.exprs.push(e);
+        // -1 because at .eat() we go one forward
+        self.exprs.push((e, SokIdx(self.si.0 - 1)));
     }
-    fn epop(&mut self) -> Expr {
+    fn epop(&mut self) -> (Expr, SokIdx) {
         self.exprs.pop().unwrap()
     }
 
@@ -121,17 +124,18 @@ impl State<'_> {
     ///
     /// - make sure setters like =,+=,-= are only called with variables as left arg
     /// - make sure all functions return values across all control flow paths
-    /// - propogate constants through expressions like 1+2 to 3
+    /// // - propogate constants through expressions like 1+2 to 3
     /// *- make sure function calls provide correct number of arguments
     /// *- calls to nonexistent functions caught
     /// - variables not (used before declaration | declared more than once)
     /// - verify that you aren't doing things like x = (x = 3);
+    /// - turn RValue into LValue, for better experience in ir_gen.rs later
     fn verify2(&mut self) {
         use Soken as S;
         match self.eat() {
             S::Return => {
                 // take expression, must be int though
-                let expr = self.epop();
+                let (expr, _) = self.epop();
                 self.require_int(expr, "Can only return int");
                 self.scopes.last_mut().unwrap().returns = true;
             }
@@ -148,7 +152,7 @@ impl State<'_> {
                 let args = *self.functions.get(&name).unwrap();
                 for _ in 0..args {
                     match self.eat() {
-                        Soken::Var(arg) => {
+                        Soken::RVar(arg) => {
                             self.add_var(arg);
                         }
                         _ => unreachable!(),
@@ -156,14 +160,14 @@ impl State<'_> {
                 }
             }
             S::If => {
-                let cond = self.epop();
+                let (cond, _) = self.epop();
                 let else_part = self.scopes.pop().unwrap();
                 let if_part = self.scopes.pop().unwrap();
                 self.require_int(cond, "If condition must be int");
                 self.scopes.last_mut().unwrap().returns |= if_part.returns & else_part.returns;
             }
             S::While => {
-                let cond = self.epop();
+                let (cond, _) = self.epop();
                 let _scope = self.scopes.pop().unwrap();
                 self.require_int(cond, "While condition must be int");
             }
@@ -195,7 +199,7 @@ impl State<'_> {
             // EXPRESSION SOKENS BEGIN HERE!!!!!!!!!!
             S::Int(_) => self.epush(Expr::LitInt),
             // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
-            S::Var(e) => {
+            S::RVar(e) => {
                 if !self.vars.contains(&e) {
                     self.report_error("Variable used before declaration");
                 }
@@ -228,18 +232,27 @@ impl State<'_> {
             // if regular binop, constant propogate ints
             S::Binop(binop) => {
                 // self.sexpect(2, "binop needs two values");
-                let right = self.epop();
-                let left = self.epop();
+                let (right, r_p) = self.epop();
+                let (left, l_p) = self.epop();
                 self.require_int(right, "Right expr of binop must be int");
                 self.require_int(left, "Left expr of binop must be int");
                 use BinaryOp as B;
                 match binop {
                     B::SetAdd | B::SetSub | B::Set => {
                         // `left` has to be ident, ERROR
-                        if !matches!(left, Expr::Var) {
-                            self.report_error( "Left hand side of setter can't be expression, must be variable name")
+                        match left {
+                            Expr::Var => {
+                                // MODIFICATION!!!!!!!!!
+                                match self.sokens[l_p.0] {
+                                    S::RVar(name) => {
+                                        self.sokens[l_p.0] = Soken::LVar(name);
+                                        self.epush(Expr::Unit); // setting returns Unit
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                            _ => self.report_error( "Left hand side of setter can't be expression, must be variable name")
                         }
-                        self.epush(Expr::Unit); // setting returns Unit
                     }
                     B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
                         self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
@@ -252,6 +265,7 @@ impl State<'_> {
             S::Nil => {
                 unreachable!("ast won't contain nil after parsing, so impossible");
             }
+            S::LVar(_) => unreachable!("won't be gen by parser"),
         }
     }
 

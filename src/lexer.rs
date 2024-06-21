@@ -7,6 +7,7 @@ use crate::Keyword;
 use crate::SetType;
 use crate::COMMENT_PREFIX;
 
+/// more high-level view of source code with respect to the grammar
 #[derive(Debug, Copy, Clone)]
 pub enum Token {
     // index into `str_storage` of Lexer

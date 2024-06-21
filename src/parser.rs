@@ -56,8 +56,11 @@ pub enum Soken {
     Return,
     /// standalone, index into int_storage
     Int(IntIdx),
-    /// standalone
-    Var(IdentIdx),
+    /// R-value variable, will only be read to
+    /// (parser will generate only RVar, but verifyer will convert stuff to LVar)
+    RVar(IdentIdx),
+    /// L-value variable, will be created by verifyer
+    LVar(IdentIdx),
     /// standalone
     CreateVar(IdentIdx),
     /// Name, lookup in hashmap how many args
@@ -254,7 +257,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                             arg => self.report("Expected argument name", Some(&arg), arg_place),
                         };
                         args += 1;
-                        self.push(Soken::Var(arg_name), arg_place);
+                        self.push(Soken::RVar(arg_name), arg_place);
                         // Next should be a comma or end paren
                         match self.eat() {
                             (_, Token::Keyword(Keyword::Comma)) => (),
@@ -383,7 +386,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                         let args = self.parse_function_call_args();
                         Soken::FuncCall(e, args)
                     }
-                    _ => Soken::Var(e),
+                    _ => Soken::RVar(e),
                 }
             }
             t @ Token::Keyword(_) => self.report("no keywords as primary in expr", Some(&t), p),

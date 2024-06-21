@@ -12,8 +12,8 @@ pub struct Label(pub u16);
 /// index into func_array
 #[derive(Clone, Copy, Debug)]
 pub struct FuncIdx(pub u16);
-/// op used in IR, simple enumeration
 
+/// op used in IR, simple enumeration
 #[derive(Clone, Copy, Debug)]
 #[repr(u16)]
 pub enum Op {
@@ -51,63 +51,6 @@ pub struct IRFunc {
     pub deadname: IdentIdx,
     pub regs_used: u16,
 }
-
-pub struct InstrIterator<'a> {
-    bytecode: Vec<ByteCode>,
-    at: usize,
-    ir_functions: &'a [IRFunc],
-}
-/// take Vec of Bytecode, output nice Instr enum that you can match on
-impl<'a> InstrIterator<'a> {
-    pub fn new(bytecode: Vec<ByteCode>, ir_functions: &'a [IRFunc]) -> InstrIterator<'a> {
-        InstrIterator {
-            bytecode,
-            at: 0,
-            ir_functions,
-        }
-    }
-    pub fn next(&mut self) -> Option<Instr> {
-        if self.at >= self.bytecode.len() {
-            return None;
-        }
-
-        let discriminator = self.bytecode[self.at];
-        let ir_head = unsafe { std::mem::transmute(discriminator) };
-
-        self.at += 1;
-        // get's the next 2byte and transmutes it to type needed.
-        macro_rules! e {
-            () => {{
-                let ne = self.bytecode[self.at];
-                self.at += 1;
-                unsafe { std::mem::transmute(ne) }
-            }};
-        }
-        let val = match ir_head {
-            IRHead::LoadReg => Instr::LoadReg(e!(), e!()),
-            IRHead::LoadInt => Instr::LoadInt(e!(), e!()),
-            IRHead::Op => Instr::Op(e!(), e!(), e!(), e!()),
-            IRHead::Call => {
-                let res_reg: Reg = e!();
-                let fn_idx: FuncIdx = e!();
-                let params: usize = self.ir_functions[fn_idx.0 as usize].params.into();
-                let slic = &self.bytecode[self.at..(self.at + params)];
-                self.at += params;
-                Instr::Call(res_reg, fn_idx, slic)
-            }
-            IRHead::Jump => Instr::Jump(e!()),
-            IRHead::JumpRegZero => Instr::JumpRegZero(e!(), e!()),
-            IRHead::Label => Instr::Label(e!()),
-            IRHead::Return => Instr::Return(e!()),
-            IRHead::FuncDef => Instr::FuncDef(e!()),
-            IRHead::EndFunc => Instr::EndFunc,
-        };
-        //println!("return instr: {:?}", val);
-
-        Some(val)
-    }
-}
-
 /// lots of functions here for generating IR
 pub fn mk_load_reg(s: &mut Vec<ByteCode>, r1: Reg, r2: Reg) {
     s.extend(&[IRHead::LoadReg as _, r1 as _, r2 as _]);
@@ -120,6 +63,7 @@ pub fn mk_load_int(s: &mut Vec<ByteCode>, r1: Reg, intidx: IntIdx) {
 pub fn mk_op(s: &mut Vec<ByteCode>, r1: Reg, op: Op, r2: Reg, r3: Reg) {
     s.extend(&[IRHead::Op as _, r1 as _, op as _, r2 as _, r3 as _]);
 }
+/// TODO: maybe take in reversed slice? We can then iterate backwards, bc of ir_gen.rs and Sokens
 pub fn mk_call(s: &mut Vec<ByteCode>, to: Reg, fnidx: FuncIdx, args: &[Reg]) {
     s.extend(&[IRHead::Call as _, to as _, fnidx.0 as _]);
     for &arg in args.iter() {
@@ -139,7 +83,6 @@ pub fn mk_return(s: &mut Vec<ByteCode>, r1: Reg) {
     s.extend(&[IRHead::Return as _, r1 as _])
 }
 pub fn mk_func_def(s: &mut Vec<ByteCode>, fnidx: FuncIdx) {
-    println!("make FUNCDEF: {:?}", fnidx);
     s.extend(&[IRHead::FuncDef as _, fnidx.0])
 }
 pub fn mk_end_func(s: &mut Vec<ByteCode>) {
@@ -170,4 +113,51 @@ pub enum Instr<'a> {
     FuncDef(FuncIdx),
     /// signals the end of function definition, useful in c_backend
     EndFunc,
+}
+/// iterates nicely over bytecode, returning Instr
+pub struct InstrIterator<'a> {
+    bytecode: Vec<ByteCode>,
+    at: usize,
+    ir_functions: &'a [IRFunc],
+}
+/// take Vec of Bytecode, output nice Instr enum that you can match on
+impl<'a> InstrIterator<'a> {
+    pub fn new(bytecode: Vec<ByteCode>, ir_functions: &'a [IRFunc]) -> InstrIterator<'a> {
+        InstrIterator {
+            bytecode,
+            at: 0,
+            ir_functions,
+        }
+    }
+    pub fn next(&mut self) -> Option<Instr> {
+        if self.at >= self.bytecode.len() {
+            return None;
+        }
+        // get's the next 2byte and transmutes it to type needed.
+        macro_rules! e {
+            () => {{
+                let ne = self.bytecode[self.at];
+                self.at += 1;
+                unsafe { std::mem::transmute(ne) }
+            }};
+        }
+        Some(match e!() {
+            IRHead::LoadReg => Instr::LoadReg(e!(), e!()),
+            IRHead::LoadInt => Instr::LoadInt(e!(), e!()),
+            IRHead::Op => Instr::Op(e!(), e!(), e!(), e!()),
+            IRHead::Call => {
+                let (res_reg, fn_idx): (Reg, FuncIdx) = (e!(), e!());
+                let params: usize = self.ir_functions[fn_idx.0 as usize].params.into();
+                let slic = &self.bytecode[self.at..(self.at + params)];
+                self.at += params;
+                Instr::Call(res_reg, fn_idx, slic)
+            }
+            IRHead::Jump => Instr::Jump(e!()),
+            IRHead::JumpRegZero => Instr::JumpRegZero(e!(), e!()),
+            IRHead::Label => Instr::Label(e!()),
+            IRHead::Return => Instr::Return(e!()),
+            IRHead::FuncDef => Instr::FuncDef(e!()),
+            IRHead::EndFunc => Instr::EndFunc,
+        })
+    }
 }

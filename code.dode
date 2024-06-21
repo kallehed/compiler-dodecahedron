@@ -102,7 +102,6 @@ fn factorial(n) {
     return factorial(n-1) * n;
 }
 
-
 fn bloated(n) {
     return n;
 }

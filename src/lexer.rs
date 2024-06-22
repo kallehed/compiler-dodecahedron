@@ -10,7 +10,7 @@ use crate::COMMENT_PREFIX;
 /// more high-level view of source code with respect to the grammar
 #[derive(Debug, Copy, Clone)]
 pub enum Token {
-    // index into `str_storage` of Lexer
+    /// index into `str_storage` of Lexer (not used yet)
     String(u16),
     Int(IntIdx),
     Keyword(Keyword),

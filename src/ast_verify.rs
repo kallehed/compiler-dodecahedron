@@ -11,7 +11,7 @@ enum Expr {
     /// int literal 34, 54, 21, use SokIdx to get what it is if you want from int_stor
     /// common case is not to look at int literals, so use array access for that.
     LitInt,
-    /// result of variable addition or whatever x + y, x+1
+    /// result of variable addition or whatever x + y, x+1, or func call
     UnkownInt,
     /// from variable (IMPORTANT: Used when doing x += 3), we need this, also for parameter to func_def
     Var,
@@ -232,7 +232,7 @@ impl State<'_> {
             // if regular binop, constant propogate ints
             S::Binop(binop) => {
                 // self.sexpect(2, "binop needs two values");
-                let (right, _) = self.epop();
+                let (right, r_p) = self.epop();
                 let (left, l_p) = self.epop();
                 self.require_int(right, "Right expr of binop must be int");
                 self.require_int(left, "Left expr of binop must be int");
@@ -255,7 +255,33 @@ impl State<'_> {
                         }
                     }
                     B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
-                        self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                        if let (Expr::LitInt, Expr::LitInt) = (left, right) {
+                            // both are constants, so can propogate it
+                            match (self.sokens[l_p.0], self.sokens[r_p.0]) {
+                                (S::Int(l), S::Int(r)) => {
+                                    let (l, r) = (self.int_stor.get(l), self.int_stor.get(r));
+                                    let res = match binop {
+                                        B::Eql => (l == r) as Int,
+                                        B::Les => (l < r) as Int,
+                                        B::Mor => (l > r) as Int,
+                                        B::Add => l + r, // want to crash on overflow
+                                        B::Sub => l - r,
+                                        B::Mul => l * r,
+                                        _ => unreachable!(),
+                                    };
+                                    let iidx = self.int_stor.insert_num_get_idx(res);
+                                    // -1 because we increment si after getting soken
+                                    self.sokens[self.si.0 - 1] = Soken::Int(iidx);
+                                    self.sokens[l_p.0] = Soken::Nil;
+                                    self.sokens[r_p.0] = Soken::Nil;
+                                    self.epush(Expr::LitInt); // one is either unknown or variable -> Var
+                                                              // TODO: Don't think we have to change the origins here, but maybe
+                                }
+                                _ => unreachable!(),
+                            }
+                        } else {
+                            self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                        }
                     }
                 }
             }

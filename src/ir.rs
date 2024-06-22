@@ -117,14 +117,14 @@ pub enum Instr<'a> {
 }
 /// iterates nicely over bytecode, returning Instr
 pub struct InstrIterator<'a> {
-    bytecode: Vec<ByteCode>,
+    bytecode: &'a Vec<ByteCode>,
     /// ONLY INTERPRETER IS ALLOWED TO ACCESS THIS
     pub at: usize,
     ir_functions: &'a [IRFunc],
 }
 /// take Vec of Bytecode, output nice Instr enum that you can match on
 impl<'a> InstrIterator<'a> {
-    pub fn new(bytecode: Vec<ByteCode>, ir_functions: &'a [IRFunc]) -> InstrIterator<'a> {
+    pub fn new(bytecode: &'a Vec<ByteCode>, ir_functions: &'a [IRFunc]) -> InstrIterator<'a> {
         InstrIterator {
             bytecode,
             at: 0,

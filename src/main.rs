@@ -117,7 +117,7 @@ fn main() {
 
         {
             println!("\n\n IR Bytecode in more readable format:\n");
-            let mut iterator = ir::InstrIterator::new(ir_bytecode.clone(), &ir_functions);
+            let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             while let Some(instr) = iterator.next() {
                 print!("{:?}, ", instr);
             }
@@ -126,7 +126,7 @@ fn main() {
         // generate c from IR
         {
             // TODO: remove clones and make iterator have reference instead of ownership
-            let mut iterator = ir::InstrIterator::new(ir_bytecode.clone(), &ir_functions);
+            let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             let c_code = c_backend::gen_c(
                 &mut iterator,
                 &ir_functions,
@@ -146,7 +146,7 @@ fn main() {
         }
         // run ir interpreter
         {
-            let mut iterator = ir::InstrIterator::new(ir_bytecode, &ir_functions);
+            let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             ir_interpreter::interpret(
                 &mut iterator,
                 &ir_functions,

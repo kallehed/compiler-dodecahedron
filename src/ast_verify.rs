@@ -232,7 +232,7 @@ impl State<'_> {
             // if regular binop, constant propogate ints
             S::Binop(binop) => {
                 // self.sexpect(2, "binop needs two values");
-                let (right, r_p) = self.epop();
+                let (right, _) = self.epop();
                 let (left, l_p) = self.epop();
                 self.require_int(right, "Right expr of binop must be int");
                 self.require_int(left, "Left expr of binop must be int");

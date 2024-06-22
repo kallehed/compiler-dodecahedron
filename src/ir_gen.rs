@@ -170,11 +170,7 @@ impl State<'_> {
     }
     /// first implementation is dumb and uses same 'register' representation for 'constants' and variable values
     fn gen_ir2(&mut self) {
-        match {
-            let a = self.eat();
-            // println!("sok: {:?}", a);
-            a
-        } {
+        match self.eat() {
             Soken::EndStat => {
                 // TODO: 'free' register?? (though not if variable...)
                 let our_scope = self.scopes.last_mut().unwrap();

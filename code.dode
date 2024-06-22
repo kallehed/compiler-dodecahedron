@@ -44,7 +44,7 @@ fn main() {
     print_zeroes(3);
 
     # expensive
-    print_int(rec_fibb(35));
+    print_int(rec_fibb(23));
     return 0;
     return 69;
     let asd = 3 + 3 + 3;

@@ -3,6 +3,7 @@
 fn main() {
     let asdy;
     asdy = 9999999-1+2+3-1+2*2+asdy;
+    return 3;
     let om = other(3,5,6)*3*4+(other(3+(343*3+asdy),55,2));
     om += (1+2*3)+other(1,2,3)+other(3*3,5*3,2*3+1);
     if many() * 33 {

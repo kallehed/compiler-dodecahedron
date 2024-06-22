@@ -151,7 +151,6 @@ fn main() {
                 &mut iterator,
                 &ir_functions,
                 &int_stor,
-                &ident_to_func_idx,
                 print_int_ident_idx,
                 &ident_idx_to_string,
             );

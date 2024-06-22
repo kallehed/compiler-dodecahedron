@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{
     ir::{FuncIdx, IRFunc, Instr, InstrIterator, Op, Reg},
     lexer::IntStor,

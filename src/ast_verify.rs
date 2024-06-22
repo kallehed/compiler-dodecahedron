@@ -20,6 +20,8 @@ enum Expr {
 struct Scope {
     returns: bool,
     local_vars: u16,
+    /// used when scope is function body, so we can point error at function name
+    started_at_si: SokIdx,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -124,7 +126,7 @@ impl State<'_> {
     ///
     /// - make sure setters like =,+=,-= are only called with variables as left arg
     /// - make sure all functions return values across all control flow paths
-    /// // - propogate constants through expressions like 1+2 to 3
+    /// - propogate constants through expressions like 1+2 to 3
     /// *- make sure function calls provide correct number of arguments
     /// *- calls to nonexistent functions caught
     /// - variables not (used before declaration | declared more than once)
@@ -148,6 +150,7 @@ impl State<'_> {
                 self.scopes.push(Scope {
                     returns: false,
                     local_vars: 0,
+                    started_at_si: SokIdx(self.si.0 - 1),
                 });
                 let args = *self.functions.get(&name).unwrap();
                 for _ in 0..args {
@@ -175,6 +178,7 @@ impl State<'_> {
                 self.scopes.push(Scope {
                     returns: false,
                     local_vars: 0,
+                    started_at_si: SokIdx(self.si.0 - 1),
                 });
             }
             // remove variable names, keep scope on stack though
@@ -192,7 +196,10 @@ impl State<'_> {
                 // compile error if we did not return
                 let func_scope = self.scopes.pop().unwrap();
                 if !func_scope.returns {
-                    self.report_error("Function must return across all control flow paths");
+                    self.report_error_on_token_idx(
+                        "Function must return across all control flow paths",
+                        func_scope.started_at_si,
+                    );
                 }
             }
 
@@ -306,6 +313,6 @@ impl State<'_> {
     }
     // implcitily reports on current soken idx
     fn report_error(&mut self, msg: &str) -> ! {
-        self.report_error_on_token_idx(msg, self.si);
+        self.report_error_on_token_idx(msg, SokIdx(self.si.0 - 1));
     }
 }

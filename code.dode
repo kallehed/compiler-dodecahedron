@@ -1,7 +1,9 @@
+
 fn main() {
 
     if 0 {print_int(34);}
     else {print_int(98765);}
+
 
     print_int(69 + 1234);
     print_int(69);
@@ -51,7 +53,6 @@ fn main() {
 
     3 +  omega(2,4) + 1;
 }
-
 
 fn non_returning() {
     let a = 34;

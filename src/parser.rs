@@ -85,10 +85,10 @@ pub enum Soken {
     DropScope,
 }
 
-struct Parser<'parser_lifetime> {
-    tokens: &'parser_lifetime mut std::iter::Peekable<
-        std::iter::Enumerate<std::slice::Iter<'parser_lifetime, Token>>,
-    >,
+struct Parser<'a> {
+    tokens: &'a [Token],
+    /// token index
+    ti: usize,
 
     // name and nr of args, later used in veryfying that called functions exist, without doing extra pass
     functions: HashMap<IdentIdx, u16>,
@@ -98,9 +98,9 @@ struct Parser<'parser_lifetime> {
     origins: Vec<usize>,
 
     // immutable:
-    token_idx_to_char_range: &'parser_lifetime Vec<(usize, usize)>,
-    source: &'parser_lifetime str,
-    file_name: &'parser_lifetime str,
+    token_idx_to_char_range: &'a Vec<(usize, usize)>,
+    source: &'a str,
+    file_name: &'a str,
 }
 
 /// returns Abstract Syntax Tree with Function hashmap which contains all functions declarations
@@ -110,9 +110,9 @@ pub fn parse(
     source: &str,
     file_name: &str,
 ) -> (Vec<Soken>, Vec<usize>, HashMap<IdentIdx, u16>) {
-    let mut token_iter = tokens.iter().enumerate().peekable();
     let mut parser = Parser {
-        tokens: &mut token_iter,
+        tokens,
+        ti: 0,
         functions: HashMap::new(),
         sokens: Vec::new(),
         origins: Vec::new(),
@@ -130,82 +130,64 @@ pub fn parse(
 macro_rules! eat_require {
     ($self:ident, $the_pattern:pat, $msg:literal) => {
         match { $self.eat() } {
-            (n, $the_pattern) => n,
-            (n, &t) => $self.report($msg, Some(&t), n),
-        }
-    };
-}
-/// takes self, pattern and error message
-macro_rules! eat_require_get {
-    ($self:ident, $the_pattern:path, $msg:literal) => {
-        match $self.eat() {
-            (n, &$the_pattern(a)) => (n, a),
-            (n, &t) => $self.report($msg, Some(&t), n),
-        }
-    };
-}
-macro_rules! peek_require_get {
-    ($self:ident, $the_pattern:path, $msg:literal) => {
-        match $self.peek() {
-            (n, &$the_pattern(a)) => (n, a),
-            (n, &t) => $self.report($msg, Some(&t), n),
+            ($the_pattern, _) => (),
+            _ => $self.report($msg),
         }
     };
 }
 
 impl<'parser_lifetime> Parser<'parser_lifetime> {
-    fn eat(&mut self) -> (usize, &Token) {
-        self.tokens.next().unwrap()
+    fn eat(&mut self) -> (Token, usize) {
+        let ret = (self.tokens[self.ti], self.ti);
+        println!("eat token {:?}", ret.0);
+        self.ti += 1;
+        ret
+    }
+    fn peek(&mut self) -> (Token, usize) {
+        (self.tokens[self.ti], self.ti)
+    }
+    /// reports the NEXT token (call this when you peeked)
+    fn report_n(&mut self, msg: &str) -> ! {
+        self.eat();
+        self.report(msg);
     }
 
-    fn peek(&mut self) -> (usize, &Token) {
-        self.tokens.peek().copied().unwrap()
-    }
-
-    fn report(&mut self, msg: &str, bad_tok: Option<&Token>, token_start_idx: usize) -> ! {
+    /// reports the current token, which was previously eaten
+    fn report(&mut self, msg: &str) -> ! {
+        let token_start_idx = self.ti - 1;
+        let bad_tok = self.tokens[token_start_idx];
         crate::mark_error_in_source(
             self.source,
             self.file_name,
             msg,
             self.token_idx_to_char_range[token_start_idx],
         );
-        if let Some(bad_tok) = bad_tok {
-            println!("\x1b[0m    bad token: `{:?}`", bad_tok);
-        } else {
-            println!("\x1b[0m    bad token could not be pinpointed unfortunately.");
-        }
+        println!("\x1b[0m    bad token: `{:?}`", bad_tok);
 
         std::process::exit(1);
     }
 
     /// require {
-    fn new_scope(&mut self, add_scope_start_soken: bool) -> usize {
-        let p = eat_require!(
+    fn new_scope(&mut self, add_scope_start_soken: bool) {
+        eat_require!(
             self,
             Token::Keyword(Keyword::StartBlock),
             "Expected `{` at start of scope"
         );
         if add_scope_start_soken {
-            self.push(Soken::StartScope, p);
+            self.pu(Soken::StartScope);
         }
         self.parse_scope();
-        let p = eat_require!(
-            self,
-            Token::Keyword(Keyword::EndBlock),
-            "Expected `}` after scope"
-        );
-        self.push(Soken::EndScope, p);
-        p
     }
     // expects semicolon and pushes EndStat Soken
     fn require_semicolon(&mut self, push: bool) {
-        let place = eat_require!(
+        eat_require!(
             self,
             Token::Keyword(Keyword::EndStatement),
             "statement must end with `;`"
         );
         if push {
-            self.push(Soken::EndStat, place);
+            self.pu(Soken::EndStat);
         }
     }
     /// add new semantic token, which was found at place
@@ -213,136 +195,129 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         self.sokens.push(soken);
         self.origins.push(place);
     }
+    /// add new semantic token, which was found at current .eat()
+    fn pu(&mut self, soken: Soken) {
+        self.sokens.push(soken);
+        self.origins.push(self.ti - 1);
+    }
 
-    /// Parse generalized tokens. Probably statements. If finds }, doesn't eat. Also ends at end of tokens
+    /// Parse generalized tokens. Probably statements. If finds }, eats. Also ends at end of tokens
     /// Variable name => Set it to expression, If => generate If node
     /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
-    /// doesn't output any { or } sokens
+    /// eats and outputs } soken
     fn parse_scope(&mut self) {
-        while let Some(&(place, &token)) = self.tokens.peek() {
-            println!("parse token {:?}", token);
-            match &token {
+        while self.ti < self.tokens.len() {
+            let (token, place) = self.eat();
+            match token {
                 Token::Keyword(Keyword::FunctionIncoming) => {
-                    self.eat();
                     // Next token should be function name identifier
                     let func_name = {
-                        let (func_name_place, func_name) = eat_require_get!(
-                            self,
-                            Token::Identifier,
-                            "Expected function name identifier"
-                        );
+                        let func_name = match self.eat() {
+                            (Token::Identifier(e), _) => e,
+                            _ => self.report("Expected function name identifier"),
+                        };
                         if self.functions.contains_key(&func_name) {
-                            self.report(
-                                "Function with same name already declared!",
-                                None,
-                                func_name_place,
-                            )
+                            self.report("Function with same name already declared!")
                         }
                         func_name
                     };
+                    self.pu(Soken::FuncDef(func_name));
                     // Next token should be start paren
                     eat_require!(
                         self,
                         Token::Keyword(Keyword::StartParen),
                         "Expected start parenthesis after function name"
                     );
-                    self.push(Soken::FuncDef(func_name), place);
                     // Next should be a series of name and type-names, ending with a end paren
                     let mut args = 0;
                     loop {
-                        let (arg_place, &arg) = self.eat();
+                        let (arg, _) = self.eat();
                         let arg_name = match arg {
                             Token::Identifier(arg_name) => arg_name,
                             Token::Keyword(Keyword::EndParen) => break,
-                            arg => self.report("Expected argument name", Some(&arg), arg_place),
+                            _ => self.report("Expected argument name"),
                         };
                         args += 1;
-                        self.push(Soken::RVar(arg_name), arg_place);
+                        self.pu(Soken::RVar(arg_name));
                         // Next should be a comma or end paren
                         match self.eat() {
-                            (_, Token::Keyword(Keyword::Comma)) => (),
-                            (_, Token::Keyword(Keyword::EndParen)) => break,
-                            (n, &t) => self.report(
-                                "Expected comma or end parenthesis after argument",
-                                Some(&t),
-                                n,
-                            ),
+                            (Token::Keyword(Keyword::Comma), _) => (),
+                            (Token::Keyword(Keyword::EndParen), _) => break,
+                            _ => self.report("Expected comma or end parenthesis after argument"),
                         };
                     }
                     self.functions.insert(func_name, args);
-                    let end_p = self.new_scope(false);
-                    self.push(Soken::EndFuncDef(func_name), end_p);
+                    self.new_scope(false);
+                    self.pu(Soken::EndFuncDef(func_name));
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
-                &Token::Keyword(Keyword::CreateVar) => {
-                    self.eat();
-                    // Next token should be variable-name, NOTICE PEEK
-                    let name = peek_require_get!(self, Token::Identifier, "expected variable_name");
-                    self.push(Soken::CreateVar(name.1), name.0);
+                Token::Keyword(Keyword::CreateVar) => {
+                    // Next token should be variable-name
+                    let maybe_name = self.eat();
+                    let name = match maybe_name.0 {
+                        Token::Identifier(e) => e,
+                        _ => self.report("Expected variable name"),
+                    };
+                    self.pu(Soken::CreateVar(name));
                     // parse expression let (a = 1+2+3)
-                    self.parse_expr(); // this outputs expr
+                    self.parse_expr(Some(maybe_name)); // this outputs expr
                     self.require_semicolon(true);
                 }
                 // If statement
                 Token::Keyword(Keyword::If) => {
-                    self.eat();
-                    self.parse_expr();
+                    self.parse_expr(None);
                     self.new_scope(true);
-                    let (_else_p, &pos_else) = self.peek();
-                    if matches!(pos_else, Token::Keyword(Keyword::Else)) {
+                    let (possible_else, _) = self.peek();
+                    if matches!(possible_else, Token::Keyword(Keyword::Else)) {
                         self.eat();
                         self.new_scope(true);
                     } else {
-                        self.push(Soken::StartScope, 0);
-                        self.push(Soken::EndScope, 0);
+                        self.pu(Soken::StartScope);
+                        self.pu(Soken::EndScope);
                     }
                     self.push(Soken::If, place);
                 }
                 // While statement
                 Token::Keyword(Keyword::While) => {
-                    self.eat();
-                    self.parse_expr();
+                    self.parse_expr(None);
                     self.new_scope(true);
                     self.push(Soken::While, place);
                 }
                 // return statement that returns from function with value
                 Token::Keyword(Keyword::Return) => {
-                    self.eat(); // eat return token
-                    self.parse_expr();
+                    self.parse_expr(None);
                     self.push(Soken::Return, place);
                     self.require_semicolon(false);
                 }
+                // basic scope has to drop scope object after itself
                 Token::Keyword(Keyword::StartBlock) => {
-                    self.eat(); // eat return token
-                    self.push(Soken::StartScope, place);
+                    self.pu(Soken::StartScope);
                     self.parse_scope();
-                    let p = eat_require!(
-                        self,
-                        Token::Keyword(Keyword::EndBlock),
-                        "Expected `}` after scope"
-                    );
-                    self.push(Soken::EndScope, p);
-                    self.push(Soken::DropScope, p);
+                    self.pu(Soken::DropScope);
                 }
                 Token::Keyword(Keyword::EndBlock) => {
+                    self.pu(Soken::EndScope);
                     return;
                 }
                 // Function call, or just expression
-                &Token::Identifier(_) | Token::Int(_) | Token::String(_) => {
+                Token::Identifier(_) | Token::Int(_) | Token::String(_) => {
                     // parse the expression. e.g. f(x) + 42, or 32 + g(f(x))
-                    self.parse_expr();
+                    self.parse_expr(Some((token, place)));
                     self.require_semicolon(true);
                 }
-                &t => self.report("Erroneous token to start statement with", Some(&t), place),
+                _ => self.report("Erroneous token to start statement with"),
             };
         }
     }
 
-    /// doesn't eat end of expression
-    fn parse_expr(&mut self) {
+    /// doesn't eat end of expression, so you can check if the expr ended with ; or {
+    fn parse_expr(&mut self, first: Option<(Token, usize)>) {
         // TODO: add prefix unary operator parsing here
-        self.parse_primary();
+        let b = first.unwrap_or_else(|| self.eat());
+
+        self.parse_primary(b.0, b.1);
+
         self.parse_binop_and_right(0)
     }
 
@@ -356,7 +331,10 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             self.eat(); // eat operator
 
             // get right hand side
-            self.parse_primary();
+            {
+                let a = self.eat();
+                self.parse_primary(a.0, a.1);
+            }
             // peek at operator after right hand side
             let (next_prec, _) = self.parse_oper();
             // now we have (a+b), though if the precedence AFTER binds tighter, this is actually a + (b * ...)
@@ -368,20 +346,19 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
         }
     }
 
-    fn parse_primary(&mut self) {
-        let (p, &token) = self.eat();
+    fn parse_primary(&mut self, token: Token, p: usize) {
         let soken = match token {
-            Token::String(_) => self.report("Strings not allowed in language currently!", None, p),
+            Token::String(_) => self.report("Strings not allowed in language currently!"),
             Token::Int(e) => Soken::Int(e),
             Token::Keyword(Keyword::StartParen) => {
-                self.parse_expr();
+                self.parse_expr(None);
                 self.eat(); // eat the end parenthesis
                 return;
             }
             Token::Identifier(e) => {
                 // can either be a variable or a function call
                 match self.peek() {
-                    (_, Token::Keyword(Keyword::StartParen)) => {
+                    (Token::Keyword(Keyword::StartParen), _) => {
                         self.eat(); // eat start paren
                         let args = self.parse_function_call_args();
                         Soken::FuncCall(e, args)
@@ -389,7 +366,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     _ => Soken::RVar(e),
                 }
             }
-            t @ Token::Keyword(_) => self.report("no keywords as primary in expr", Some(&t), p),
+            Token::Keyword(_) => self.report("no keywords as primary in expr"),
         };
         self.push(soken, p);
     }
@@ -399,19 +376,19 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_function_call_args(&mut self) -> u16 {
         let mut args = 0;
         // if no args
-        if let (_, Token::Keyword(Keyword::EndParen)) = self.peek() {
+        if let (Token::Keyword(Keyword::EndParen), _) = self.peek() {
         } else {
             // eat all arguments
             loop {
-                self.parse_expr();
+                self.parse_expr(None);
                 args += 1;
 
                 match self.peek() {
-                    (_, Token::Keyword(Keyword::EndParen)) => break,
-                    (_, Token::Keyword(Keyword::Comma)) => {
+                    (Token::Keyword(Keyword::EndParen), _) => break,
+                    (Token::Keyword(Keyword::Comma), _) => {
                         self.eat(); // eat comma
                     }
-                    (n, &t) => self.report("expected comma", Some(&t), n),
+                    _ => self.report_n("expected comma"),
                 }
             }
         }
@@ -423,7 +400,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     /// DOES NOT EAT TOKEN
     /// if ` ; ) } ` ... returns -1 (special precedence)
     fn parse_oper(&mut self) -> (BinOpPrec, usize) {
-        let (res_place, &res_token) = self.peek();
+        let (res_token, res_place) = self.peek();
         use BinaryOp as B;
         use Keyword as K;
         use Token::Keyword as T;
@@ -438,14 +415,10 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
             T(K::Set(SetType::Sub)) => B::SetSub.prec(),
             T(K::Set(SetType::Set)) => B::Set.prec(),
             T(K::EndParen) | T(K::EndStatement) | T(K::StartBlock) | T(K::Comma) => -1, // -1 precedence, end of expr
-            _ => self.report(
-                &format!(
-                    "What are you doing? Can't just put token `{:?}` here!",
-                    res_token
-                ),
-                Some(&res_token),
-                res_place,
-            ),
+            _ => self.report_n(&format!(
+                "What are you doing? Can't just put token `{:?}` here!",
+                res_token
+            )),
         };
         (prec, res_place)
     }

@@ -45,18 +45,17 @@ or use shorthand:
 
 # Structure and what things do:
 
-### lexer: lexer.rs
+### Lexer: lexer.rs
 Takes source file and outputs tokens
 Tokens could be identifiers (variable or function names) or keywords (if while { ( [ )
-### parser: parser.rs
+Checks that the delimiters (, [ and { are balanced.
+### Parser: parser.rs
 Takes tokens and outputs sokens (Semantic tokens)
-Recursive descent operator precedence parser that makes sure all the tokens fit the grammar
-of the language. The sokens represent the program in reverse polish notation, not only
-expressions, but also scopes/blocks/{}
-### verification: ast_verify.rs
+Recursive descent operator precedence parser that makes sure all the tokens fit the grammar of the language. The sokens represent the program in reverse polish notation, not only expressions, but also scopes/blocks/{}
+### Verification: ast_verify.rs
 Takes Sokens and does type-checking, that-you-return checking, variable used before declaration.
-Also, turns RValues into LValues if they are next to setters (=,+=,-=)
-### ir generation: ir_gen.rs, ir.rs
+Also, turns RValues into LValues if they are next to setters (=,+=,-=) (might remove this)
+### Ir generation: ir_gen.rs, ir.rs
 Generate IR (immediate representation) in the form of Vec<ByteCode>.
 ir_gen.rs uses functions prefixed with mk_ in ir.rs to generate bytecode.
 ### c code generation: c_backend.rs
@@ -64,17 +63,15 @@ Iterates over IR using `InstrIterator` from `ir.rs` and generates c code using i
 this c code contains a million goto's, because the IR is like assembly
 
 # Program correctness thoughts:
- - A variable can only be used after it has been created. It's lifetime cascades to child blocks. Variable shadowing may not happen in descendant blocks. OBVIOUS - VERY
-   Implement this by keeping track of created variables and making sure that used variables have been declared before. Have a 'global' hashset and
-   let each block have a Vec of their declared variables, and let a block remove it's variables after it has run out. Current version: each block has a 'nbr_of_locals', then we have hashset of variables, and also a Vec of variables which acts as a stack to remove from the hashset when gone from scope.
-- Should every AST node have a source reference, like, char range? Yes
+ - Variable shadowing not allowed.
+ TODO: Don't allow nested functions, right now: bad behaviour.
+ TODO: Better errors, be able to show 2 locations (use when bad delimiters, also when no return)
 
 # Design principles
+### On how errors are shown to user:
 Compilation errors are a special case, instead of storing where a token came from inside the token, have a separate vec of (usize,usize) to store locations. When lexing, you just have to write to this Vec. When compilation error -> can do slow things like look up stuff in this big Vec, but that's fine.
 Then the Soken's have a parallel array that references the Token idx that it came from. When failing on a Soken, we take it's idx -> we look up origins to get the token idx, then use that to index into source code locations array
 
-TODO: Don't allow nested functions, right now: bad behaviour.
-TODO: Better errors, be able to show 2 locations (use when bad delimiters, also when no return)
 
 # Things to think about:
 How should the Soken's be iterated? Should I create some sort of abstraction around it to make the verifyer and the c backend simpler? But I don't want to lose performance, also don't want to lose readability of code (sequentiality), though readability already suffers a bit from reverse polish notation style expressions, bc have to express stuff backwards.
@@ -97,7 +94,7 @@ alternatives:
 good, because can put expr on stack and stuff, efficient, though get's very hairy when you get to the ELSE_BLOCK, because have to remember that we were in an if, and let's say you want to know if they returned from the THEN and ELSE block? would be hard to do logic, because would have to put stuff on a stack, which would somehow be popped after the ELSE block, which then did a bunch of [if] logic, which is stupid, because the code would be fragmented all over the place.
 THOUGH: I could actually reach the if and then do recursion on THEN and ELSE. Good because we know what to do when done with them
 - [if] <EXPR> <THEN_BLOCK> <ELSE_BLOCK>
-good, because when you reach the [if] you can just first eval <EXPR>, and then recursively evaluate THEN and ELSE. Maybe introduces more complication though? Because have to add expression function call to if token, which could be cleaner.
+good, because when you reach the [if] you can just first eval <EXPR>, and then recursively evaluate THEN and ELSE. Maybe introduces more complication though? Because have to add expression function call to if token, which could be cleaner. ALSO: Maybe there is just ONE obvious way we always want to look through an if statement, and EVEN if there was some absurd case where you want to generate the code for the ELSE_BLOCK first, you COULD just walk over the EXPR and THEN_BLOCK, and then do them later. It's a little bit slower, but much better than anything else, like allocating them beforehand.
 - <EXPR> <THEN_BLOCK> <ELSE_BLOCK> [if]
 good, because would have stack that not only contains expression items, but also block items, which would 'return' something useful to ANYTHING wanting anything to do with it. Bad because either the blocks would be generic, and therefore all blocks would be treated the same, or we would make the blocks special, and they would return special variants the if statement wants. GOOD: unfifies expression and statement parsing somewhat. BAD: When generating C code, each block would be a String or something, which would be returned and receieved by the [if], which would do something. But like I said, this gets you no choice in how to process the blocks. Though maybe there is no special cases for blocks, and if there were there could be special introducer Sokens for that?
 
@@ -116,15 +113,9 @@ about the process of a pass (lexer, parser, verifyer, ir_gen) so I get a bunch o
 put it all into my struct. Thus I have to write the types of the input THREE times. Also, when
 I am doing logic, I call a bunch of methods like: `self.get_expr` or `self.pop_stack` to do something
 in my `State` context. This always passes around a `State` pointer, and I usually hold EVERYTHING
-in this struct to remove friction of all the context needed as arguments. Though this doesn't feel
-very efficient. Also, because 99% of methods are like `fn XXX(&mut self, ...)` (they take mutable
-to Self), you can't do things like: self.XXX(self.YYY()), which is SUPER-annoying and destroys code
-readability somewhat.
+in this struct to remove friction of all the context needed as arguments. Though this doesn't feel very efficient. Also, because 99% of methods are like `fn XXX(&mut self, ...)` (they take mutable to Self), you can't do things like: self.XXX(self.YYY()), which is SUPER-annoying and destroys code readability somewhat.
 SOLUTION (bad/maybe good): make all the methods macros. The macros are defined in the function.
-This means they can refer to all the args of the function (some of the context), and ALSO variables (if the ma-
-cro is defined AFTER the variable). This is very nice. Though all of them will be inlined... which is also
-probably fine unless I want to to something complicated or weird assertion. THOUGH I could put function call
-into macro if I want to. (You can also do {} in macro to make block that returns thing, rust is very nice in that way, with returning blocks, like holy shit)
+This means they can refer to all the args of the function (some of the context), and ALSO variables (if the macro is defined AFTER the variable). This is very nice. Though all of them will be inlined... which is also probably fine unless I want to to something complicated or weird assertion. THOUGH I could put function call into a macro if I want to. (You can also do {} in macro to make block that returns thing, rust is very nice in that way, with returning blocks, like holy shit)
 Problem: Can't do recursion anymore.
 Problem: Macros are less typed
 
@@ -278,7 +269,7 @@ FUNC_DEF: fnidx
 END_FUNC:
  -> end_func
 
-    3
+    ?
 CALL: reg fnidx reg*
  -> call fn .1 with X many regs starting at .2, place result into .0
   (get nbr of arguments though auxiliary ir_functions)

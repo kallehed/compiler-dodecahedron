@@ -6,6 +6,7 @@ mod ir;
 mod ir_gen;
 mod ir_interpreter;
 mod lexer;
+mod llvm_backend;
 mod parser;
 
 struct CompilerFlags {

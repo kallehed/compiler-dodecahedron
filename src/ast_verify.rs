@@ -276,9 +276,9 @@ impl State<'_> {
                                         B::Mul => l * r,
                                         _ => unreachable!(),
                                     };
-                                    let iidx = self.int_stor.insert_num_get_idx(res);
                                     // -1 because we increment si after getting soken
-                                    self.sokens[self.si.0 - 1] = Soken::Int(iidx);
+                                    self.sokens[self.si.0 - 1] =
+                                        Soken::Int(self.int_stor.insert_num_get_idx(res));
                                     self.sokens[l_p.0] = Soken::Nil;
                                     self.sokens[r_p.0] = Soken::Nil;
                                     self.epush(Expr::LitInt); // one is either unknown or variable -> Var

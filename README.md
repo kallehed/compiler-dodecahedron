@@ -55,6 +55,7 @@ Recursive descent operator precedence parser that makes sure all the tokens fit 
 ### Verification: ast_verify.rs
 Takes Sokens and does type-checking, that-you-return checking, variable used before declaration.
 Also, turns RValues into LValues if they are next to setters (=,+=,-=) (might remove this)
+TODO: Remove things after a return statement. Or maybe do this in ir_gen? Bc have do to hard work in llvm_backend to manually remove that later
 ### Ir generation: ir_gen.rs, ir.rs
 Generate IR (immediate representation) in the form of Vec<ByteCode>.
 ir_gen.rs uses functions prefixed with mk_ in ir.rs to generate bytecode.

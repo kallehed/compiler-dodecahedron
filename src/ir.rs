@@ -6,7 +6,7 @@ pub type Reg = u16;
 /// in instructions we will have labels
 /// TODO: could possibly have hashmap saying where on is
 /// can jump to them
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Label(pub u16);
 
 /// index into func_array
@@ -97,7 +97,7 @@ pub enum Instr<'a> {
     LoadReg(Reg, Reg),
     /// load Int into register
     LoadInt(Reg, IntIdx),
-    // .0 = .2 `.1` .3
+    /// .0 = .2 `.1` .3
     Op(Reg, Op, Reg, Reg),
     /// .0 = .1(.2...)        Call .1 with slice as arguments
     Call(Reg, FuncIdx, &'a [Reg]),

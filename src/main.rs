@@ -14,6 +14,9 @@ struct CompilerFlags {
 }
 static mut FLAGS: CompilerFlags = CompilerFlags { verbose: false };
 
+const GEN_C: bool = false;
+const INTERPRET: bool = false;
+
 fn main() {
     println!("Hello, world!");
 
@@ -21,7 +24,8 @@ fn main() {
 
     let mut file_name = "code.dode";
 
-    let (source_size, tokens_size, sokens_size, ir_size, c_code_size);
+    let (mut source_size, mut tokens_size, mut sokens_size, mut ir_size, mut c_code_size) =
+        (0, 0, 0, 0, 0);
 
     // TODO: make compiler handle verbose flag
 
@@ -125,7 +129,7 @@ fn main() {
         }
 
         // generate c from IR
-        {
+        if GEN_C {
             // TODO: remove clones and make iterator have reference instead of ownership
             let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             let c_code = c_backend::gen_c(
@@ -146,7 +150,7 @@ fn main() {
             }
         }
         // run ir interpreter
-        {
+        if INTERPRET {
             let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             ir_interpreter::interpret(
                 &mut iterator,
@@ -155,6 +159,19 @@ fn main() {
                 print_int_ident_idx,
                 &ident_idx_to_string,
             );
+        }
+        // run llvm backend on IR
+        {
+            println!("\n\nGENERATING LLVM IR:\n ");
+            let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
+            unsafe {
+                llvm_backend::llvm_gen(
+                    &mut iterator,
+                    &ir_functions,
+                    &int_stor,
+                    &ident_idx_to_string,
+                );
+            }
         }
     }
 

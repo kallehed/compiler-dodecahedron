@@ -1,4 +1,13 @@
 
+fn whatupllvm() {
+    let a = 34;
+    if a > 55 {
+        a += 3;
+        return 55;
+    }
+    return 33;
+}
+
 fn main() {
 
     if 0 {print_int(34);}
@@ -47,11 +56,10 @@ fn main() {
 
     # expensive
     print_int(rec_fibb(23));
-    return 0;
-    return 69;
     let asd = 3 + 3 + 3;
 
     3 +  omega(2,4) + 1;
+    return 0;
 }
 
 fn non_returning() {

@@ -125,13 +125,14 @@ impl State<'_> {
     /// (*) signifies that it can ONLY be done after parsing, or in pass after parsing
     ///
     /// - make sure setters like =,+=,-= are only called with variables as left arg
-    /// - make sure all functions return values across all control flow paths
+    /// *- make sure all functions return values across all control flow paths
     /// - propogate constants through expressions like 1+2 to 3
     /// *- make sure function calls provide correct number of arguments
     /// *- calls to nonexistent functions caught
     /// - variables not (used before declaration | declared more than once)
-    /// - verify that you aren't doing things like x = (x = 3);
+    /// - verify that you aren't doing things like y = (x = 3);
     /// - turn RValue into LValue, for better experience in ir_gen.rs later
+    /// *- error on putting statements after a return
     fn verify2(&mut self) {
         use Soken as S;
         match self.eat() {
@@ -140,6 +141,11 @@ impl State<'_> {
                 let (expr, _) = self.epop();
                 self.require_int(expr, "Can only return int");
                 self.scopes.last_mut().unwrap().returns = true;
+                // MAKE SURE THERE ARE NO STATEMENTS AFTER A RETURN:
+                if !matches!(self.sokens[self.si.0], S::EndScope) {
+                    // bad, you just put something illegal after return
+                    self.report_error("Don't put any statements after a return, they do nothing");
+                }
             }
             S::CreateVar(name) => {
                 self.add_var(name);
@@ -249,20 +255,27 @@ impl State<'_> {
                         // `left` has to be ident, ERROR
                         match left {
                             Expr::Var => {
-                                // MODIFICATION!!!!!!!!!
-                                match self.sokens[l_p.0] {
-                                    S::RVar(name) => {
-                                        self.sokens[l_p.0] = Soken::LVar(name);
-                                        self.epush(Expr::Unit); // setting returns Unit
+                                if self.scopes.last_mut().unwrap().returns == true {
+                                    self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                                } else {
+                                    // MODIFICATION!!!!!!!!!
+                                    match self.sokens[l_p.0] {
+                                        S::RVar(name) => {
+                                            self.sokens[l_p.0] = Soken::LVar(name);
+                                            self.epush(Expr::Unit); // setting returns Unit
+                                        }
+                                        _ => unreachable!(),
                                     }
-                                    _ => unreachable!(),
+
                                 }
                             }
                             _ => self.report_error( "Left hand side of setter can't be expression, must be variable name")
                         }
                     }
                     B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
-                        if let (Expr::LitInt, Expr::LitInt) = (left, right) {
+                        if self.scopes.last_mut().unwrap().returns == true {
+                            self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                        } else if let (Expr::LitInt, Expr::LitInt) = (left, right) {
                             // both are constants, so can propogate it
                             match (self.sokens[l_p.0], self.sokens[r_p.0]) {
                                 (S::Int(l), S::Int(r)) => {

@@ -4,10 +4,11 @@ use std::ffi::CStr;
 use crate::ir::{IRFunc, Instr, InstrIterator};
 use crate::lexer::IntStor;
 
-use llvm_sys::analysis::*;
 use llvm_sys::bit_writer::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
+use llvm_sys::transforms::pass_builder::*;
+use llvm_sys::{analysis::*, LLVMOpcode};
 
 pub unsafe fn llvm_gen(
     ir: &mut InstrIterator,
@@ -67,37 +68,31 @@ pub unsafe fn llvm_gen(
         }};
     }
 
-    // if true: generate code, if false: we have already returned/branched in this block, so don't generate stuff, llvm doesn't like it
-    let mut ret_hack = true;
-    macro_rules! skip_if_already_returned {
-        () => {
-            if !ret_hack {
-                continue;
-            }
-        };
-    }
-
-    let mut since_label = 0;
+    // it's not legal to generate code after a branch or a return.
+    // also use this to generate some extra branches if a block had no code.
+    let mut legal_to_gen = true;
 
     while let Some(instr) = ir.next() {
-        since_label += 1;
+        if !legal_to_gen {
+            match instr {
+                Instr::FuncDef(_) | Instr::EndFunc | Instr::Label(_) => (),
+                _ => continue,
+            }
+        }
         match instr {
             Instr::LoadReg(into, from) => {
-                skip_if_already_returned!();
                 LLVMBuildStore(builder, get_reg![from], get_reg![into]);
             }
             Instr::LoadInt(reg, iidx) => {
-                skip_if_already_returned!();
                 let val = LLVMConstInt(int, intstor.get(iidx) as _, 1);
                 LLVMBuildStore(builder, val, get_reg![reg]);
             }
             Instr::Op(into, op, left, right) => {
-                skip_if_already_returned!();
                 let left = LLVMBuildLoad2(builder, int, get_reg![left], c"lef".as_ptr());
                 let right = LLVMBuildLoad2(builder, int, get_reg![right], c"rig".as_ptr());
                 let res = LLVMBuildBinOp(
                     builder,
-                    llvm_sys::LLVMOpcode::LLVMAdd,
+                    LLVMOpcode::LLVMAdd,
                     left,
                     right,
                     c"res_of_binop".as_ptr(),
@@ -105,7 +100,6 @@ pub unsafe fn llvm_gen(
                 LLVMBuildStore(builder, res, get_reg![into]);
             }
             Instr::Call(to, fnidx, args) => {
-                skip_if_already_returned!();
                 let func = &my_funcs[fnidx.0 as usize];
                 let ir_func = &ir_functions[fnidx.0 as usize];
                 let mut ll_args = vec![];
@@ -124,14 +118,12 @@ pub unsafe fn llvm_gen(
                 LLVMBuildStore(builder, res, get_reg![to]);
             }
             Instr::Jump(label) => {
-                skip_if_already_returned!();
                 LLVMBuildBr(builder, get_label_bb!(label));
-                ret_hack = false; // BRANCH!
+                legal_to_gen = false;
             }
             // if we get here, we will create a new block, but since we haven't returned or branched yet
             // we don't need to set ret_hack to anything, it's already true
             Instr::JumpRegZero(reg, label) => {
-                skip_if_already_returned!();
                 let the_reg = LLVMBuildLoad2(builder, int, get_reg![reg], c"getit".as_ptr());
                 let cmp = LLVMBuildICmp(
                     builder,
@@ -145,18 +137,28 @@ pub unsafe fn llvm_gen(
                 LLVMPositionBuilderAtEnd(builder, dont_jump_bb);
             }
             Instr::Label(label) => {
-                if ret_hack {
-                    // because ret_hack was true, the previous block never returned, so
-                    // we will have to branch for them to this block
-                    // so if we have LABEL1: LABEL2: we will insert a branch after LABEL1: to LABEL2
+                /*|| {
+                    let a = LLVMGetInstructionOpcode(some_instr);
+                    println!("not null: {:?}", a);
+                    match a {
+                        LLVMOpcode::LLVMRet | LLVMOpcode::LLVMBr => false,
+                        _ => true,
+                        }
+                }*/
+                if legal_to_gen {
                     LLVMBuildBr(builder, get_label_bb!(label));
                 }
-                ret_hack = true;
+                /*if ret_hack {
+                // because ret_hack was true, the previous block never returned, so
+                // we will have to branch for them to this block
+                // so if we have LABEL1: LABEL2: we will insert a branch after LABEL1: to LABEL2
+                }*/
                 // builder shall build here now
                 LLVMPositionBuilderAtEnd(builder, get_label_bb!(label));
+                legal_to_gen = true;
             }
             Instr::FuncDef(fnidx) => {
-                ret_hack = true;
+                legal_to_gen = true;
                 cur_regs.clear();
                 let func = &my_funcs[fnidx.0 as usize];
                 cur_func = func;
@@ -176,25 +178,32 @@ pub unsafe fn llvm_gen(
                 }
             }
             Instr::Return(reg) => {
-                skip_if_already_returned!();
                 let res = LLVMBuildLoad2(builder, int, get_reg!(reg), c"to_retun_this".as_ptr());
                 LLVMBuildRet(builder, res);
-                ret_hack = false;
+                legal_to_gen = false;
             }
             // what to do here?
             Instr::EndFunc => {
-                skip_if_already_returned!();
                 // we reached the end without branching or returning ...
                 // insert return that will never happen, because we are in the situation:
                 // LABEL1: [end_of_func]
-                LLVMBuildRet(builder, LLVMConstInt(int, 5454, 1));
+                if legal_to_gen {
+                    LLVMBuildRet(builder, LLVMConstInt(int, 5454, 1));
+                }
+                println!("\n\nDONE WITH THIS FUNC: \n \n");
+                LLVMDumpValue(cur_func.func);
+                LLVMVerifyFunction(
+                    cur_func.func,
+                    LLVMVerifierFailureAction::LLVMAbortProcessAction,
+                );
             }
         }
     }
+
     let mut msg: *mut i8 = std::ptr::null_mut();
     println!("\n\nLLVM IR DUMP:\n\n ");
     LLVMDumpModule(md);
-    // will look like IOT instruction core dumped for some reason
+    // will look like IOT instruction core dumped for some reason, if we fail
     LLVMVerifyModule(
         md,
         LLVMVerifierFailureAction::LLVMAbortProcessAction,

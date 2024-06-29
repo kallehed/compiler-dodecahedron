@@ -1,118 +1,15 @@
 
-fn whatupllvm() {
-    let a = 34;
-    if a > 55 {
-        a += 3;
-        return 55;
-    }
-    return 33;
-}
 
 fn main() {
 
-    if 0 {print_int(34);}
-    else {print_int(98765);}
+	let i = 0;
+	print_int(i);
+	while i < 50 {
+		print_int(i);
+		i += 1;
+	}
 
 
-    print_int(69 + 1234);
-    print_int(69);
-    print_int(1234);
-    print_int(1 + 2 * 2 + 1);
-    {
-        let a = 1;
-        let b = 2 + a + 3*4+2>5*1-3<2*3 + 4;
-        let c = 3 + b - b * a * 2;
-        print_int(a + b + c);
-    }
-
-    if 0 {
-        print_int(69);
-    }
-    fibb(2+3*3,3,2+1+1+1+1);
-    let a = 3434;
-
-    if 34 {
-        print_int(233);
-        let x =  4;
-    }
-    let x = 34;
-
-    if 45 {
-        print_int(1+3*3*3*3+4+5);
-    }
-    else {}
-
-    fibb(1000000, 0, 1);
-    print_zeroes(5);
-    #let x = 1 + (x = 3);
-    if x == 3 {}
-
-    let b = 1;
-    while b < 10 {
-        print_int(factorial(b));
-        b += 1;
-    }
-    print_zeroes(3);
-
-    # expensive
-    print_int(rec_fibb(23));
-    let asd = 3 + 3 + 3;
-
-    3 +  omega(2,4) + 1;
-    return 0;
+	return 222;
 }
 
-fn non_returning() {
-    let a = 34;
-    if 1 {
-        return 3;
-    }
-    else {if 2 {return 5;} else {return 6;}}
-    while 1 {
-        return 4;
-    }
-}
-
-fn omega(a,b) {return 0;}
-
-fn print_zeroes(n) {
-    let b = 0;
-    while b < n {
-        b += 1;
-        print_int(0);
-    }
-    return 0;
-}
-
-fn rec_fibb(n) {
-    if n == 0 {
-        return 0;
-    }
-    if n == 1 {
-        return 1;
-    }
-    return rec_fibb(n-1) +  rec_fibb(n-2);
-}
-
-fn fibb(n, start, start2) {
-    let a = start;
-    let b = start2;
-    while a < n {
-        print_int(a);
-        let c = a + b;
-        a = b;
-        b = c;
-    }
-    return 0;
-}
-
-fn factorial(n) {
-    if n < 2 {
-        return 1;
-    }
-    return factorial(n-1) * n;
-}
-
-fn bloated(n) {
-    return n;
-}

@@ -7,8 +7,8 @@ use crate::lexer::IntStor;
 use llvm_sys::bit_writer::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
-use llvm_sys::transforms::pass_builder::*;
 use llvm_sys::{analysis::*, LLVMOpcode};
+use llvm_sys::{LLVMCallConv, LLVMLinkage};
 
 pub unsafe fn llvm_gen(
     ir: &mut InstrIterator,
@@ -38,6 +38,8 @@ pub unsafe fn llvm_gen(
         real_name.push('\0');
 
         let my_func = LLVMAddFunction(md, real_name.as_ptr() as *const i8, func_type);
+        LLVMSetFunctionCallConv(my_func, LLVMCallConv::LLVMCCallConv as u32);
+        LLVMSetLinkage(my_func, LLVMLinkage::LLVMExternalLinkage);
 
         my_funcs.push(Func {
             func: my_func,
@@ -81,7 +83,8 @@ pub unsafe fn llvm_gen(
         }
         match instr {
             Instr::LoadReg(into, from) => {
-                LLVMBuildStore(builder, get_reg![from], get_reg![into]);
+                let le_val = LLVMBuildLoad2(builder, int, get_reg![from], c"from_le".as_ptr());
+                LLVMBuildStore(builder, le_val, get_reg![into]);
             }
             Instr::LoadInt(reg, iidx) => {
                 let val = LLVMConstInt(int, intstor.get(iidx) as _, 1);
@@ -171,10 +174,11 @@ pub unsafe fn llvm_gen(
                     let alloc = LLVMBuildAlloca(builder, int, c"l_alloca".as_ptr());
                     cur_regs.push(alloc);
                     // load args into the first regs we have on stack
-                    if i < ir_func.params {
+                }
+                for i in 0..ir_func.params {
+                        // set to arg
                         let param = LLVMGetParam(func.func, i as u32);
-                        LLVMBuildStore(builder, param, alloc);
-                    }
+                        LLVMBuildStore(builder, param, get_reg![i]);
                 }
             }
             Instr::Return(reg) => {

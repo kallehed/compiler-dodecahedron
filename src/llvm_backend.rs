@@ -6,6 +6,7 @@ use crate::lexer::IntStor;
 
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
+use llvm_sys::target::LLVMIntPtrTypeInContext;
 use llvm_sys::{analysis::*, LLVMOpcode};
 use llvm_sys::{bit_writer::*, LLVMIntPredicate};
 use llvm_sys::{LLVMCallConv, LLVMLinkage};
@@ -27,6 +28,19 @@ pub unsafe fn llvm_gen(
     }
 
     let mut my_funcs = vec![];
+    println!("IR Funcs: ");
+
+    let (printf, printf_type) = {
+        let mut params = vec![LLVMPointerTypeInContext(ctx, 0)];
+        let printf_type = LLVMFunctionType(
+            LLVMInt32TypeInContext(ctx),
+            params.as_mut_ptr(),
+            params.len() as _,
+            true as _,
+        );
+        let printf = LLVMAddFunction(md, c"printf".as_ptr(), printf_type);
+        (printf, printf_type)
+    };
 
     for func in ir_functions.iter() {
         let mut params = vec![int; func.params as usize];
@@ -34,17 +48,37 @@ pub unsafe fn llvm_gen(
         let func_type = LLVMFunctionType(int, params.as_mut_ptr(), func.params as u32, 0);
 
         let real_name = ident_idx_to_string[func.deadname as usize];
-        let mut real_name = real_name.to_owned();
-        real_name.push('\0');
+        let mut real_name_nul = real_name.to_owned();
+        real_name_nul.push('\0');
 
-        let my_func = LLVMAddFunction(md, real_name.as_ptr() as *const i8, func_type);
+        let my_func = LLVMAddFunction(md, real_name_nul.as_ptr() as *const i8, func_type);
         LLVMSetFunctionCallConv(my_func, LLVMCallConv::LLVMCCallConv as u32);
         LLVMSetLinkage(my_func, LLVMLinkage::LLVMExternalLinkage);
 
         my_funcs.push(Func {
             func: my_func,
             typ: func_type,
-        })
+        });
+        println!("real name: {:?}", real_name);
+        if real_name == "print_int" {
+            let bb = LLVMAppendBasicBlock(my_func, c"entry".as_ptr());
+            LLVMPositionBuilderAtEnd(builder, bb);
+            let int_to_print = LLVMGetParam(my_func, 0);
+
+            let p_str =
+                LLVMBuildGlobalStringPtr(builder, c"%ld\n".as_ptr(), c"printf_str".as_ptr());
+            let mut args = [p_str, int_to_print];
+
+            LLVMBuildCall2(
+                builder,
+                printf_type,
+                printf,
+                args.as_mut_ptr(),
+                args.len() as _,
+                c"res_of_call".as_ptr(),
+            );
+            LLVMBuildRet(builder, LLVMConstInt(int, 0, 0));
+        }
     }
 
     let mut cur_regs = vec![];
@@ -87,7 +121,7 @@ pub unsafe fn llvm_gen(
                 LLVMBuildStore(builder, le_val, get_reg![into]);
             }
             Instr::LoadInt(reg, iidx) => {
-                let val = LLVMConstInt(int, intstor.get(iidx) as _, 1);
+                let val = LLVMConstInt(int, intstor.get(iidx) as _, 0);
                 LLVMBuildStore(builder, val, get_reg![reg]);
             }
             Instr::Op(into, op, left, right) => {
@@ -102,7 +136,9 @@ pub unsafe fn llvm_gen(
                             Op::Eql => LLVMIntPredicate::LLVMIntEQ,
                             _ => unreachable!(),
                         };
-                        LLVMBuildICmp(builder, llvm_op, left, right, c"res_of_icmp".as_ptr())
+                        let res =
+                            LLVMBuildICmp(builder, llvm_op, left, right, c"res_of_icmp".as_ptr());
+                        LLVMBuildSExt(builder, res, int, c"AHHH".as_ptr())
                     }
                     Op::Add | Op::Sub | Op::Mul => {
                         let llvm_op = match op {
@@ -145,7 +181,7 @@ pub unsafe fn llvm_gen(
                 let cmp = LLVMBuildICmp(
                     builder,
                     llvm_sys::LLVMIntPredicate::LLVMIntEQ,
-                    LLVMConstInt(int, 0, 1),
+                    LLVMConstInt(int, 0, 0),
                     the_reg,
                     c"res_of_cmpeq".as_ptr(),
                 );
@@ -193,7 +229,7 @@ pub unsafe fn llvm_gen(
                 // insert return that will never happen, because we are in the situation:
                 // LABEL1: [end_of_func]
                 if legal_to_gen {
-                    LLVMBuildRet(builder, LLVMConstInt(int, 5454, 1));
+                    LLVMBuildRet(builder, LLVMConstInt(int, 5454, 0));
                 }
                 println!("\n\nDONE WITH THIS FUNC: \n \n");
                 LLVMDumpValue(cur_func.func);

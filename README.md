@@ -48,6 +48,11 @@ shorthand:
 
     cargo r && llc test.bc && clang test.s dode_std.c && ./a.out
 
+something else:
+    llc -filetype=obj -relocation-model=pic test.bc -o test.o
+
+    clang test.o -fPIE -pie -o a.out
+
 
 
 ## Convert AST into IR
@@ -302,6 +307,9 @@ This was because piping changes the buffering so it only sends data when the buf
 This was fixed by calling `fflush(stdout)` at the end of _start
 
 Accidentally read the bytecode at a 1-index offset, leading to EVERYTHING getting misinterpreted , lead to un-debuggable segfault for some reason >:(
+
+Incredibly STUPID and ANNOYING error, that seemed to replicate everywhere without giving a trace of itself, only infecting other pieces of code, making me debug something COMPLETELY different for hours because I THOUGHT something was wrong with my c ffi. AHHHH
+I got an i1 from a comparison, then I loaded that into a alloca memory, not realizing that it would only set ONE bit of my 64 bit register memory. SO later when I tried to use the alloca memory, everything failed because it already had bits somewhere else.
 
 # OLD syntax
 ```

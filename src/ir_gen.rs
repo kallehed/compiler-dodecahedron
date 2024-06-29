@@ -314,7 +314,7 @@ impl State<'_> {
                 let end_l = self.get_label();
 
                 let cond_reg = self.pop_expr();
-                let cond_reg = self.realize_stackitem(cond_reg, true);
+                let cond_reg = self.realize_stackitem(cond_reg, false);
                 let cond_reg = self.use_some_reg(cond_reg);
                 // generate jump instruction if we got false
                 mk_jump_req_zero(self.s_i(), cond_reg, else_l);
@@ -332,7 +332,7 @@ impl State<'_> {
 
                 mk_label(self.s_i(), before);
                 let cond_reg = self.pop_expr();
-                let cond_reg = self.realize_stackitem(cond_reg, true);
+                let cond_reg = self.realize_stackitem(cond_reg, false);
                 let cond_reg = self.use_some_reg(cond_reg);
                 mk_jump_req_zero(self.s_i(), cond_reg, after);
 
@@ -348,9 +348,7 @@ impl State<'_> {
                     expr_instr: Vec::new(),
                 });
             }
-            // TODO: free registers?
             Soken::EndScope => (),
-            // TODO: free registers?
             Soken::DropScope => {
                 self.scopes.pop().unwrap();
             }

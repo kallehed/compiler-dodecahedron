@@ -1,15 +1,34 @@
 
-
 fn main() {
-
-	let i = 0;
-	print_int(i);
-	while i < 50 {
-		print_int(i);
-		i += 1;
-	}
-
-
-	return 222;
+    print_zeroes(5);
+    if 1 {
+      print_int(123123);
+      print_int(123123);
+      print_int(123123);
+      print_int(123123);
+      }
+    #fibb(100,0,1);
+    print_zeroes(5);
+    return 0;
 }
 
+fn print_zeroes(n) {
+    let b = 0;
+    while b < n {
+        b += 1;
+        print_int(0);
+    }
+    return 0;
+}
+
+fn fibb(n, start, start2) {
+    let a = start;
+    let b = start2;
+    while a < n {
+        print_int(a);
+        let c = a + b;
+        a = b;
+        b = c;
+    }
+    return 0;
+}

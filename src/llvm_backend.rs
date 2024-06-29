@@ -4,10 +4,10 @@ use std::ffi::CStr;
 use crate::ir::{IRFunc, Instr, InstrIterator};
 use crate::lexer::IntStor;
 
-use llvm_sys::bit_writer::*;
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
 use llvm_sys::{analysis::*, LLVMOpcode};
+use llvm_sys::{bit_writer::*, LLVMIntPredicate};
 use llvm_sys::{LLVMCallConv, LLVMLinkage};
 
 pub unsafe fn llvm_gen(
@@ -93,13 +93,27 @@ pub unsafe fn llvm_gen(
             Instr::Op(into, op, left, right) => {
                 let left = LLVMBuildLoad2(builder, int, get_reg![left], c"lef".as_ptr());
                 let right = LLVMBuildLoad2(builder, int, get_reg![right], c"rig".as_ptr());
-                let res = LLVMBuildBinOp(
-                    builder,
-                    LLVMOpcode::LLVMAdd,
-                    left,
-                    right,
-                    c"res_of_binop".as_ptr(),
-                );
+                use crate::ir::Op;
+                let res = match op {
+                    Op::Mor | Op::Les | Op::Eql => {
+                        let llvm_op = match op {
+                            Op::Mor => LLVMIntPredicate::LLVMIntSGT,
+                            Op::Les => LLVMIntPredicate::LLVMIntSLT,
+                            Op::Eql => LLVMIntPredicate::LLVMIntEQ,
+                            _ => unreachable!(),
+                        };
+                        LLVMBuildICmp(builder, llvm_op, left, right, c"res_of_icmp".as_ptr())
+                    }
+                    Op::Add | Op::Sub | Op::Mul => {
+                        let llvm_op = match op {
+                            Op::Add => LLVMOpcode::LLVMAdd,
+                            Op::Sub => LLVMOpcode::LLVMSub,
+                            Op::Mul => LLVMOpcode::LLVMMul,
+                            _ => unreachable!(),
+                        };
+                        LLVMBuildBinOp(builder, llvm_op, left, right, c"res_of_binop".as_ptr())
+                    }
+                };
                 LLVMBuildStore(builder, res, get_reg![into]);
             }
             Instr::Call(to, fnidx, args) => {
@@ -140,22 +154,10 @@ pub unsafe fn llvm_gen(
                 LLVMPositionBuilderAtEnd(builder, dont_jump_bb);
             }
             Instr::Label(label) => {
-                /*|| {
-                    let a = LLVMGetInstructionOpcode(some_instr);
-                    println!("not null: {:?}", a);
-                    match a {
-                        LLVMOpcode::LLVMRet | LLVMOpcode::LLVMBr => false,
-                        _ => true,
-                        }
-                }*/
                 if legal_to_gen {
+                    // branch to label
                     LLVMBuildBr(builder, get_label_bb!(label));
                 }
-                /*if ret_hack {
-                // because ret_hack was true, the previous block never returned, so
-                // we will have to branch for them to this block
-                // so if we have LABEL1: LABEL2: we will insert a branch after LABEL1: to LABEL2
-                }*/
                 // builder shall build here now
                 LLVMPositionBuilderAtEnd(builder, get_label_bb!(label));
                 legal_to_gen = true;
@@ -173,12 +175,11 @@ pub unsafe fn llvm_gen(
                 for i in 0..ir_func.regs_used {
                     let alloc = LLVMBuildAlloca(builder, int, c"l_alloca".as_ptr());
                     cur_regs.push(alloc);
-                    // load args into the first regs we have on stack
                 }
                 for i in 0..ir_func.params {
-                        // set to arg
-                        let param = LLVMGetParam(func.func, i as u32);
-                        LLVMBuildStore(builder, param, get_reg![i]);
+                    // set to arg
+                    let param = LLVMGetParam(func.func, i as u32);
+                    LLVMBuildStore(builder, param, get_reg![i]);
                 }
             }
             Instr::Return(reg) => {

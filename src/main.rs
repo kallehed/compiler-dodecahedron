@@ -15,7 +15,8 @@ struct CompilerFlags {
 static mut FLAGS: CompilerFlags = CompilerFlags { verbose: false };
 
 const GEN_C: bool = false;
-const INTERPRET: bool = false;
+const INTERPRET: bool = true;
+const GEN_LLVM: bool = false;
 
 fn main() {
     println!("Hello, world!");
@@ -161,7 +162,7 @@ fn main() {
             );
         }
         // run llvm backend on IR
-        {
+        if GEN_LLVM {
             println!("\n\nGENERATING LLVM IR:\n ");
             let mut iterator = ir::InstrIterator::new(&ir_bytecode, &ir_functions);
             unsafe {

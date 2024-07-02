@@ -1,12 +1,10 @@
 use std::collections::HashMap;
-use std::ffi::CStr;
 
 use crate::ir::{IRFunc, Instr, InstrIterator};
 use crate::lexer::IntStor;
 
 use llvm_sys::core::*;
 use llvm_sys::prelude::*;
-use llvm_sys::target::LLVMIntPtrTypeInContext;
 use llvm_sys::{analysis::*, LLVMOpcode};
 use llvm_sys::{bit_writer::*, LLVMIntPredicate};
 use llvm_sys::{LLVMCallConv, LLVMLinkage};
@@ -240,7 +238,6 @@ pub unsafe fn llvm_gen(
             }
         }
     }
-
     let mut msg: *mut i8 = std::ptr::null_mut();
     println!("\n\nLLVM IR DUMP:\n\n ");
     LLVMDumpModule(md);

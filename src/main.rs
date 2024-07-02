@@ -15,7 +15,7 @@ struct CompilerFlags {
 static mut FLAGS: CompilerFlags = CompilerFlags { verbose: false };
 
 const GEN_C: bool = false;
-const INTERPRET: bool = true;
+const INTERPRET: bool = false;
 const GEN_LLVM: bool = false;
 
 fn main() {
@@ -202,8 +202,10 @@ type Int = i64;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Keyword {
-    /// let
-    CreateVar,
+    /// immutable binding
+    CreateConstVar,
+    /// mutable binding
+    CreateMutVar,
     If,
     Else,
     While,

@@ -127,7 +127,30 @@ Could instead be written like:
       print(b);
     }
 Also reduces clutter, parenthesis
-### on tuples:
+
+In an alternative rust syntax, where `let` was more of a prefix than a statement introducer, one could write:
+   let mut a = 3;
+   while a > 3 {
+       (a, let b) = func();
+       print(b);
+   }
+though that looks kind of confusing, and uses lots of space for `let`, when names are more important.
+
+Alternative: var, const
+   var a = 2;
+   const b = 3;
+less good, because longer to type. Also, how does this work with multiple return values?
+    var a, b = func(); // makes both mutable BAD
+so only alternative is:
+    var a, const b = func();
+but that gets very verbose and unnecessarily long so:
+    !~a, !b = func(); // is better
+though, it's worse for the normal case, where you just want to get the returned values with new names and use them, which rust does well: `let (a,b,c,d,e,f) = func();`
+so I could do:
+    let ~a, b = func();
+But might as well test the ! syntax, maybe it's good IDK.
+
+## on tuples:
 you can have a single value, though in actuality that is the same as having a tuple with a single value. (i32) = i32, in wheA.
 
 rust way of dealing with tuples:
@@ -250,14 +273,15 @@ f(1,2)
 **CREATE_VAR**:
 ```
 let a = 2;
-->  [create_var a] [a][2][=]           two statements
-FORM: [CreateVar(ident: a)] <EXPR>
+->  [a] [init_var `a` to prev]           two statements
+FORM:  <EXPR> [InitVar(ident: a)] [;]
 or actual:
 let b;
--> [CreateVar(ident)]
-<CREATE_VAR> ::= [CreateVar(ident)]
+-> [InitVar(ident)]
+<CREATE_VAR> ::= [CreateVar(ident)] [;]
 ```
-(problem with this is you can reference the variable in the definition: let x=x)
+// (problem with this is you can reference the variable in the definition: let x=x)
+(try to fix this by postfixing the InitVar thing instead of prefixing it)
 
 
 **SEMICOLON**:  (consumes value)

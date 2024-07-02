@@ -1,5 +1,5 @@
 use crate::parser::Soken;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::{parser::BinaryOp, IdentIdx, Int};
 
@@ -14,7 +14,8 @@ enum Expr {
     /// result of variable addition or whatever x + y, x+1, or func call
     UnkownInt,
     /// from variable (IMPORTANT: Used when doing x += 3), we need this, also for parameter to func_def
-    Var,
+    /// holds the ident of variable
+    Var(IdentIdx),
     Unit,
 }
 struct Scope {
@@ -24,13 +25,17 @@ struct Scope {
     started_at_si: SokIdx,
 }
 
+struct VarInfo {
+    mutable: bool,
+}
+
 #[derive(Copy, Clone, Debug)]
 struct SokIdx(usize);
 struct State<'b> {
-    /// function ident and nr of parameters
+    // function ident and nr of parameters
     //function_calls: Vec<&'b ASTExpr>, // not used?
-    /// O(1) local var exists checker
-    vars: HashSet<IdentIdx>,
+    /// O(1) local var exists checker, alsog gives VarInfo struct that contains data about variable, such as mutability
+    vars: HashMap<IdentIdx, VarInfo>,
     // each scope holds how many vars it creates, they are added here and removed from self.vars after scope ends
     ordered_vars: Vec<IdentIdx>,
     sokens: &'b mut [Soken],
@@ -65,7 +70,7 @@ pub fn run<'a>(
     int_stor: &mut IntStor,
 ) {
     let mut s = State {
-        vars: HashSet::new(),
+        vars: HashMap::new(),
         ordered_vars: Vec::new(),
         sokens,
         origins,
@@ -87,12 +92,15 @@ pub fn run<'a>(
 impl State<'_> {
     fn eat(&mut self) -> Soken {
         let s = self.sokens[self.si.0];
+        println!("verify sok: {:?}", s);
+        println!("nbr of expr {}", self.exprs.len());
         self.si.0 += 1;
         s
     }
     /// add var, also send token index of soken of var, uses implicit si
-    fn add_var(&mut self, name: IdentIdx) {
-        if !self.vars.insert(name) {
+    fn add_var(&mut self, name: IdentIdx, mutable: bool) {
+        let vi = VarInfo { mutable };
+        if self.vars.insert(name, vi).is_some() {
             self.report_error("Variable has already been declared!");
         }
         // if global scope contains it, this can't (can't assert bc Vector::push)
@@ -133,6 +141,7 @@ impl State<'_> {
     /// - verify that you aren't doing things like y = (x = 3);
     /// - turn RValue into LValue, for better experience in ir_gen.rs later
     /// *- error on putting statements after a return
+    /// - error on mutating immutable variables
     fn verify2(&mut self) {
         use Soken as S;
         match self.eat() {
@@ -147,11 +156,14 @@ impl State<'_> {
                     self.report_error("Don't put any statements after a return, they do nothing");
                 }
             }
-            S::CreateVar(name) => {
-                self.add_var(name);
+            S::InitVar(name, mutable) => {
+                let (expr, _) = self.epop();
+                self.require_int(expr, "Can only set variable to int");
+                self.add_var(name, mutable);
+                self.epush(Expr::Unit); // setting a var returns Unit
             }
-            // basically just create arg variables
-            // TODO: maybe store name ident in scope so we can print it later if function doesn't return?
+            // basically just create arg variables, in scope, store where we started so error can point to here if function doesn't return
+            // also, function parameters are immutable, look at the `false` below
             S::FuncDef(name) => {
                 self.scopes.push(Scope {
                     returns: false,
@@ -162,7 +174,8 @@ impl State<'_> {
                 for _ in 0..args {
                     match self.eat() {
                         Soken::RVar(arg) => {
-                            self.add_var(arg);
+                            // Function arguments are immutable, const and unchangeable.
+                            self.add_var(arg, false);
                         }
                         _ => unreachable!(),
                     }
@@ -191,7 +204,10 @@ impl State<'_> {
             S::EndScope => {
                 let scope = self.scopes.last().unwrap();
                 for _ in 0..scope.local_vars {
-                    assert!(self.vars.remove(&self.ordered_vars.pop().unwrap()));
+                    assert!(self
+                        .vars
+                        .remove(&self.ordered_vars.pop().unwrap())
+                        .is_some());
                 }
             }
             S::DropScope => {
@@ -213,10 +229,10 @@ impl State<'_> {
             S::Int(_) => self.epush(Expr::LitInt),
             // Check that variable has been declared. This works for the FN_DEF case, bc args are afterwards
             S::RVar(e) => {
-                if !self.vars.contains(&e) {
+                if !self.vars.contains_key(&e) {
                     self.report_error("Variable used before declaration");
                 }
-                self.epush(Expr::Var);
+                self.epush(Expr::Var(e));
             }
 
             // CALL to ALREADY EXISTING function
@@ -254,11 +270,16 @@ impl State<'_> {
                     B::SetAdd | B::SetSub | B::Set => {
                         // `left` has to be ident, ERROR
                         match left {
-                            Expr::Var => {
+                            Expr::Var(var_ident) => {
+                                // WTF does this do? TODO REMOVE THIS AND ONE BELOW
                                 if self.scopes.last_mut().unwrap().returns == true {
-                                    self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                                    self.epush(Expr::UnkownInt);
                                 } else {
-                                    // MODIFICATION!!!!!!!!!
+                                    // make sure variable is mutable, because we are trying to change it here
+                                    if !self.vars[&var_ident].mutable {
+                                        self.report_error("Trying to change immutable variable");
+                                    }
+                                    // MODIFICATION!!!!!!!!! TODO: remove
                                     match self.sokens[l_p.0] {
                                         S::RVar(name) => {
                                             self.sokens[l_p.0] = Soken::LVar(name);
@@ -266,15 +287,15 @@ impl State<'_> {
                                         }
                                         _ => unreachable!(),
                                     }
-
                                 }
                             }
-                            _ => self.report_error( "Left hand side of setter can't be expression, must be variable name")
+                            _ => self.report_error( "Left hand side of setter can't be expression, must be variable name"),
                         }
                     }
                     B::Eql | B::Les | B::Mor | B::Add | B::Sub | B::Mul => {
+                        // TODO REMOVE THIS, SEEMS BAD
                         if self.scopes.last_mut().unwrap().returns == true {
-                            self.epush(Expr::UnkownInt); // one is either unknown or variable -> Var
+                            self.epush(Expr::UnkownInt);
                         } else if let (Expr::LitInt, Expr::LitInt) = (left, right) {
                             // both are constants, so can propogate it
                             match (self.sokens[l_p.0], self.sokens[r_p.0]) {
@@ -294,8 +315,8 @@ impl State<'_> {
                                         Soken::Int(self.int_stor.insert_num_get_idx(res));
                                     self.sokens[l_p.0] = Soken::Nil;
                                     self.sokens[r_p.0] = Soken::Nil;
-                                    self.epush(Expr::LitInt); // one is either unknown or variable -> Var
-                                                              // TODO: Don't think we have to change the origins here, but maybe
+                                    self.epush(Expr::LitInt);
+                                    // TODO: Don't think we have to change the origins here, but maybe
                                 }
                                 _ => unreachable!(),
                             }

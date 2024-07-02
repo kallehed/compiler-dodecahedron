@@ -96,7 +96,6 @@ pub fn generate_tokens(
         // these have to be seperated by whitespace
         let str_to_keyword: HashMap<&str, Keyword> = {
             let mut map = HashMap::new();
-            map.insert("let", Keyword::CreateVar);
             map.insert("if", Keyword::If);
             map.insert("else", Keyword::Else);
             map.insert("while", Keyword::While);
@@ -117,10 +116,14 @@ pub fn generate_tokens(
             map.insert("*", Keyword::Multiply);
             map.insert("<", Keyword::Less);
             map.insert(">", Keyword::More);
+            map.insert("!", Keyword::CreateConstVar);
+            map.insert("!~", Keyword::CreateMutVar);
             map
         };
 
+        // to START looking for `mathy_keywords`, we first notice one of these
         // when lexing mathy keywords, these characters can occur
+        // also to know when the mathy_keyword ends, like: asd+=sdf;
         let math_chars: HashSet<char> = {
             let mut set = HashSet::new();
             set.insert('=');
@@ -131,6 +134,8 @@ pub fn generate_tokens(
             set.insert('*');
             set.insert('/');
             set.insert('%');
+            set.insert('!');
+            set.insert('~');
             set
         };
 

@@ -61,8 +61,8 @@ pub enum Soken {
     RVar(IdentIdx),
     /// L-value variable, will be created by verifyer
     LVar(IdentIdx),
-    /// standalone
-    CreateVar(IdentIdx),
+    /// prefixed by expression saying what to initialize the variable to, bool says whether it it is mutable or not (TRUE = MUTABLE)
+    InitVar(IdentIdx, bool),
     /// Name, lookup in hashmap how many args
     FuncDef(IdentIdx),
     /// signals that function definition ended
@@ -207,12 +207,14 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
     fn parse_scope(&mut self) {
         while self.ti < self.tokens.len() {
             let (token, place) = self.eat();
+            use Keyword as K;
+            use Token as T;
             match token {
-                Token::Keyword(Keyword::FunctionIncoming) => {
+                T::Keyword(K::FunctionIncoming) => {
                     // Next token should be function name identifier
                     let func_name = {
                         let func_name = match self.eat() {
-                            (Token::Identifier(e), _) => e,
+                            (T::Identifier(e), _) => e,
                             _ => self.report("Expected function name identifier"),
                         };
                         if self.functions.contains_key(&func_name) {
@@ -224,7 +226,7 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     // Next token should be start paren
                     eat_require!(
                         self,
-                        Token::Keyword(Keyword::StartParen),
+                        T::Keyword(K::StartParen),
                         "Expected start parenthesis after function name"
                     );
                     // Next should be a series of name and type-names, ending with a end paren
@@ -232,16 +234,16 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     loop {
                         let (arg, _) = self.eat();
                         let arg_name = match arg {
-                            Token::Identifier(arg_name) => arg_name,
-                            Token::Keyword(Keyword::EndParen) => break,
+                            T::Identifier(arg_name) => arg_name,
+                            T::Keyword(K::EndParen) => break,
                             _ => self.report("Expected argument name"),
                         };
                         args += 1;
                         self.pu(Soken::RVar(arg_name));
                         // Next should be a comma or end paren
                         match self.eat() {
-                            (Token::Keyword(Keyword::Comma), _) => (),
-                            (Token::Keyword(Keyword::EndParen), _) => break,
+                            (T::Keyword(K::Comma), _) => (),
+                            (T::Keyword(K::EndParen), _) => break,
                             _ => self.report("Expected comma or end parenthesis after argument"),
                         };
                     }
@@ -251,24 +253,35 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                 }
                 // create variable with `let`, just lookahead on name, later code will handle rest as expression
                 // TODO fix so you can't do let a += 1; or let b + 3;
-                Token::Keyword(Keyword::CreateVar) => {
+                T::Keyword(K::CreateConstVar) | T::Keyword(K::CreateMutVar) => {
+                    let mutable = match token {
+                        T::Keyword(K::CreateConstVar) => false,
+                        T::Keyword(K::CreateMutVar) => true,
+                        _ => unreachable!(),
+                    };
                     // Next token should be variable-name
                     let maybe_name = self.eat();
                     let name = match maybe_name.0 {
-                        Token::Identifier(e) => e,
+                        T::Identifier(e) => e,
                         _ => self.report("Expected variable name"),
                     };
-                    self.pu(Soken::CreateVar(name));
+                    // Next token should be =
+                    eat_require!(
+                        self,
+                        T::Keyword(K::Set(SetType::Set)),
+                        "Require = after declaring variable"
+                    );
                     // parse expression let (a = 1+2+3)
-                    self.parse_expr(Some(maybe_name)); // this outputs expr
+                    self.parse_expr(None); // this outputs expr
+                    self.push(Soken::InitVar(name, mutable), place);
                     self.require_semicolon(true);
                 }
                 // If statement
-                Token::Keyword(Keyword::If) => {
+                T::Keyword(K::If) => {
                     self.parse_expr(None);
                     self.new_scope(true);
                     let (possible_else, _) = self.peek();
-                    if matches!(possible_else, Token::Keyword(Keyword::Else)) {
+                    if matches!(possible_else, T::Keyword(K::Else)) {
                         self.eat();
                         self.new_scope(true);
                     } else {
@@ -278,29 +291,29 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
                     self.push(Soken::If, place);
                 }
                 // While statement
-                Token::Keyword(Keyword::While) => {
+                T::Keyword(K::While) => {
                     self.parse_expr(None);
                     self.new_scope(true);
                     self.push(Soken::While, place);
                 }
                 // return statement that returns from function with value
-                Token::Keyword(Keyword::Return) => {
+                T::Keyword(K::Return) => {
                     self.parse_expr(None);
                     self.push(Soken::Return, place);
                     self.require_semicolon(false);
                 }
                 // basic scope has to drop scope object after itself
-                Token::Keyword(Keyword::StartBlock) => {
+                T::Keyword(K::StartBlock) => {
                     self.pu(Soken::StartScope);
                     self.parse_scope();
                     self.pu(Soken::DropScope);
                 }
-                Token::Keyword(Keyword::EndBlock) => {
+                T::Keyword(K::EndBlock) => {
                     self.pu(Soken::EndScope);
                     return;
                 }
                 // Function call, or just expression
-                Token::Identifier(_) | Token::Int(_) | Token::String(_) => {
+                T::Identifier(_) | T::Int(_) | T::String(_) => {
                     // parse the expression. e.g. f(x) + 42, or 32 + g(f(x))
                     self.parse_expr(Some((token, place)));
                     self.require_semicolon(true);

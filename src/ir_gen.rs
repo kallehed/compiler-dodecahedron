@@ -147,6 +147,7 @@ impl State<'_> {
         }
     }
 
+    // allocate new register which is unused
     fn get_reg(&mut self) -> Reg {
         let ret = self.free_reg;
         self.free_reg += 1;
@@ -168,11 +169,16 @@ impl State<'_> {
             }
         }
     }
+    /// also puts the expr stuff in stat instr
+    fn expr_to_usable_once_reg(&mut self) -> Reg {
+        let stackitem = self.pop_expr();
+        let some_reg = self.realize_stackitem(stackitem, false);
+        self.use_some_reg(some_reg)
+    }
     /// first implementation is dumb and uses same 'register' representation for 'constants' and variable values
     fn gen_ir2(&mut self) {
         match self.eat() {
             Soken::EndStat => {
-                // TODO: 'free' register?? (though not if variable...)
                 let our_scope = self.scopes.last_mut().unwrap();
                 our_scope.instr.extend(&our_scope.expr_instr);
                 our_scope.expr_instr.clear();
@@ -187,29 +193,31 @@ impl State<'_> {
                 }
             }
             Soken::Return => {
-                let stackitem = self.pop_expr();
-                let some_reg = self.realize_stackitem(stackitem, false);
-                let reg = self.use_some_reg(some_reg);
+                let reg = self.expr_to_usable_once_reg();
                 mk_return(self.s_i(), reg);
             }
             Soken::Int(intidx) => {
                 // don't be eager, could use less registers if we don't place the number into a register yet
                 self.stack.push(StackItem::NotYetPlacedInt(intidx))
             }
+            //push to the stack the reg with the variable
             Soken::RVar(varidx) => {
                 let reg = self.varname_to_reg[&varidx];
                 self.stack.push(StackItem::S(SomeReg::Var(reg)))
             }
+            // same, TODO: remove Lvalues or whatever
             Soken::LVar(varidx) => {
-                // maybe we can just push to the stack the reg with the variable?
                 let reg = self.varname_to_reg[&varidx];
                 self.stack.push(StackItem::S(SomeReg::Var(reg)))
             }
-            Soken::CreateVar(varidx) => {
-                // set a new free register to 0
-                let reg = self.get_reg();
-                self.varname_to_reg.insert(varidx, reg);
-                mk_load_int(self.e_i(), reg, IntIdx::new(0));
+            // we don't really care if your variable is mutable or not, because it's still just in memory, and we know the program is correct, so no checking is needed
+            Soken::InitVar(varidx, _mutable) => {
+                // get new reg for variable, set it to expression
+                let from_reg = self.expr_to_usable_once_reg();
+                let var_reg = self.get_reg();
+                self.varname_to_reg.insert(varidx, var_reg);
+                mk_load_reg(self.s_i(), var_reg, from_reg);
+                self.stack.push(StackItem::Unit);
             }
             Soken::Binop(binop) => {
                 let right = self.stack.pop().unwrap();
@@ -313,9 +321,7 @@ impl State<'_> {
                 let else_l = self.get_label();
                 let end_l = self.get_label();
 
-                let cond_reg = self.pop_expr();
-                let cond_reg = self.realize_stackitem(cond_reg, false);
-                let cond_reg = self.use_some_reg(cond_reg);
+                let cond_reg = self.expr_to_usable_once_reg();
                 // generate jump instruction if we got false
                 mk_jump_req_zero(self.s_i(), cond_reg, else_l);
                 self.extend_instr(&then_scope.instr);
@@ -331,9 +337,7 @@ impl State<'_> {
                 let after = self.get_label();
 
                 mk_label(self.s_i(), before);
-                let cond_reg = self.pop_expr();
-                let cond_reg = self.realize_stackitem(cond_reg, false);
-                let cond_reg = self.use_some_reg(cond_reg);
+                let cond_reg = self.expr_to_usable_once_reg();
                 mk_jump_req_zero(self.s_i(), cond_reg, after);
 
                 self.extend_instr(&while_scope.instr);

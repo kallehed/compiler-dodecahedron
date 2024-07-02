@@ -203,7 +203,6 @@ impl<'parser_lifetime> Parser<'parser_lifetime> {
 
     /// Parse generalized tokens. Probably statements. If finds }, eats. Also ends at end of tokens
     /// Variable name => Set it to expression, If => generate If node
-    /// SHOULD NOT be used so much in code, function parse_scope_require_start_brace is cleaner most of time
     /// eats and outputs } soken
     fn parse_scope(&mut self) {
         while self.ti < self.tokens.len() {

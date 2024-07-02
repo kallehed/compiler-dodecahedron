@@ -16,7 +16,7 @@ static mut FLAGS: CompilerFlags = CompilerFlags { verbose: false };
 
 const GEN_C: bool = false;
 const INTERPRET: bool = true;
-const GEN_LLVM: bool = true;
+const GEN_LLVM: bool = false;
 
 fn main() {
     println!("Hello, world!");

@@ -83,9 +83,64 @@ TODO: Remove things after a return statement. Or maybe do this in ir_gen? Bc hav
 ### Ir generation: ir_gen.rs, ir.rs
 Generate IR (immediate representation) in the form of Vec<ByteCode>.
 ir_gen.rs uses functions prefixed with mk_ in ir.rs to generate bytecode.
+## alternative backends:
+
 ### c code generation: c_backend.rs
 Iterates over IR using `InstrIterator` from `ir.rs` and generates c code using it
 this c code contains a million goto's, because the IR is like assembly
+### llvm ir gen: llvm_backend.rs
+Iterates over IR using `InstrIterator`. Generates LLVM IR. We make our own `print_int` in LLVM IR, that calls printf with printf being declared.
+TODO: make better llvm gener that looks at the Value and checks if it is a constant, ptr or register, and does better initial code generation based on that.
+
+# language design thoughts:
+## Mutability of variables
+It's easier to reason about a program if we know certain variables are immutable. This should be done by default so you only make the variables that actually need it mutable.
+    let mut a = 3; // rust
+    let ~a = 3; // dodecahedron
+    !~a = 3; // with ! declaration syntax
+### parameter immutability
+ we could make parameters mutable with:
+     fn func(~a, b, ~c) {...}
+but maybe just make them immutable?
+## On ways to declare a variable: (declaration )
+    let a = 0; // rusty way
+
+    !a = 0; // HERE I AM! (conflicts with NOT operator)
+
+    @a = 0; // I am AT here (no conflicts)
+when a function returns multiple values:
+    // rust, both immutable
+    let (a, b) = func();
+    // or one mutable
+    let (mut a, b) = func();
+Notice how in both scenarios both a and b are declared and initialized. While this may reduce reading overhead, it makes the following case longer:
+    let mut a = 3;
+    while a > 3 {
+        let (new_a, b) = func();
+        a = new_a; // have to set a here
+        print(b);
+    }
+Could instead be written like:
+    !~a = 3;
+    while a > 3 {
+      a, !b = func();
+      print(b);
+    }
+Also reduces clutter, parenthesis
+### on tuples:
+you can have a single value, though in actuality that is the same as having a tuple with a single value. (i32) = i32, in wheA.
+
+rust way of dealing with tuples:
+    let (x, y) = my_tuple_returning_func();
+    // or
+    let xy = my_tuple_returning_func(); // then xy.0 = x, xy.1 = y
+If you have a tuple of (a, b) and a function is: fn(a,b) you have to do:
+    my_non_tuple_taking_func(xy.0, xy.1);
+    // it would be nicer with just
+    my_non_tuple_taking_func(xy)
+so xy is some sort of object holding the structure required for 2 arguments.
+
+
 
 # Program correctness thoughts:
  - Variable shadowing not allowed.
